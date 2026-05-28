@@ -1,9 +1,8 @@
-// ui/main.slint — Collector v3
-// Photo picker · Editable custom fields
+// ui/main.slint — Collector v4
 
 import { ScrollView } from "std-widgets.slint";
 
-// ─── Data Structures ─────────────────────────────────────────────────────────
+// ─── Data Structures ──────────────────────────────────────────────────────────
 
 export struct CollectionData {
     id: string,
@@ -16,40 +15,52 @@ export struct ItemData {
     id: string,
     name: string,
     short-desc: string,
-    has-photo: bool,          // true when a photo has been assigned
-    thumbnail: image,         // loaded and passed in by Rust
+    has-photo: bool,
+    thumbnail: image,
     collection-id: string,
 }
 
 export struct FieldData {
-    id: string,       // uuid so Rust can identify which field to delete/edit
+    id: string,
     label: string,
     value: string,
+}
+
+export struct TemplateData {
+    id: string,
+    name: string,
+    field-labels: string,
+}
+
+// CheckedItem wraps bool so [CheckedItem] works as a model
+export struct CheckedItem {
+    checked: bool,
 }
 
 // ─── Theme Global ─────────────────────────────────────────────────────────────
 
 export global Theme {
-    in-out property <bool>  dark-mode:     true;
-    in-out property <color> bg-base:       #0f1117;
-    in-out property <color> bg-panel:      #161b24;
-    in-out property <color> bg-surface:    #1e2535;
-    in-out property <color> bg-elevated:   #252d40;
-    in-out property <color> bg-card:       #1a2130;
-    in-out property <color> bg-card-hover: #212a3e;
-    in-out property <color> bg-selected:   #1d3557;
-    in-out property <color> bg-input:      #0f1117;
-    in-out property <color> accent:        #4f8ef7;
-    in-out property <color> accent-dim:    #2a4f96;
-    in-out property <color> accent-glow:   #4f8ef730;
-    in-out property <color> accent-text:   #7eb3ff;
-    in-out property <color> text-primary:  #e8edf5;
-    in-out property <color> text-secondary:#8896b0;
-    in-out property <color> text-muted:    #4a5568;
-    in-out property <color> border:        #252d40;
-    in-out property <color> border-accent: #4f8ef750;
-    in-out property <color> danger-bg:     #3d1515;
-    in-out property <color> danger-text:   #f87171;
+    in-out property <bool>   dark-mode:      true;
+    in-out property <length> ui-font-size:   15px;
+    in-out property <color>  bg-base:        #0f1117;
+    in-out property <color>  bg-panel:       #161b24;
+    in-out property <color>  bg-surface:     #1e2535;
+    in-out property <color>  bg-elevated:    #252d40;
+    in-out property <color>  bg-card:        #1a2130;
+    in-out property <color>  bg-card-hover:  #212a3e;
+    in-out property <color>  bg-selected:    #1d3557;
+    in-out property <color>  bg-input:       #0f1117;
+    in-out property <color>  accent:         #4f8ef7;
+    in-out property <color>  accent-dim:     #2a4f96;
+    in-out property <color>  accent-glow:    #4f8ef730;
+    in-out property <color>  accent-text:    #7eb3ff;
+    in-out property <color>  text-primary:   #e8edf5;
+    in-out property <color>  text-secondary: #8896b0;
+    in-out property <color>  text-muted:     #4a5568;
+    in-out property <color>  border:         #252d40;
+    in-out property <color>  border-accent:  #4f8ef750;
+    in-out property <color>  danger-bg:      #3d1515;
+    in-out property <color>  danger-text:    #f87171;
 }
 
 // ─── Drag Handle ──────────────────────────────────────────────────────────────
@@ -57,10 +68,8 @@ export global Theme {
 component DragHandle {
     callback drag(length);
     width: 6px;
-
     drag-touch := TouchArea {
-        width: 6px;
-        mouse-cursor: col-resize;
+        width: 6px; mouse-cursor: col-resize;
         property <length> start-x;
         pointer-event(e) => {
             if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
@@ -74,7 +83,6 @@ component DragHandle {
             }
         }
     }
-
     Rectangle {
         width: 2px; x: 2px; height: parent.height;
         background: drag-touch.has-hover || drag-touch.pressed ? Theme.accent : Theme.border;
@@ -88,8 +96,10 @@ component SectionLabel {
     in property <string> text;
     height: 22px;
     Text {
-        text: root.text; font-size: 11px; letter-spacing: 1.5px;
-        color: Theme.text-muted; font-weight: 600; vertical-alignment: center;
+        text: root.text;
+        font-size: max(9px, Theme.ui-font-size - 4px);
+        letter-spacing: 1.5px; color: Theme.text-muted;
+        font-weight: 600; vertical-alignment: center;
     }
 }
 
@@ -101,10 +111,8 @@ component IconBtn {
     in property <bool>   active: false;
     in property <length> btn-width: 28px;
     callback clicked;
-
     width: btn-width; height: 28px;
     t := TouchArea { clicked => { root.clicked(); } }
-
     Rectangle {
         border-radius: 6px;
         background: root.active ? Theme.accent
@@ -121,23 +129,20 @@ component IconBtn {
     }
 }
 
-// ─── Color Swatch ─────────────────────────────────────────────────────────────
+// ─── Checkbox ─────────────────────────────────────────────────────────────────
 
-component ColorSwatch {
-    in property <color> swatch-color;
-    in property <bool>  selected;
-    callback clicked;
-
-    width: 28px; height: 28px;
-    t := TouchArea { clicked => { root.clicked(); } }
-
+component Checkbox {
+    in property <bool> checked;
+    callback toggled;
+    width: 18px; height: 18px;
+    t := TouchArea { clicked => { root.toggled(); } }
     Rectangle {
-        border-radius: 6px; background: root.swatch-color;
-        border-width: root.selected ? 2px : (t.has-hover ? 1px : 0px);
-        border-color: root.selected ? Theme.text-primary : #ffffff60;
-        animate border-width { duration: 100ms; }
-        if root.selected: Text {
-            text: "✓"; font-size: 12px; font-weight: 700; color: #fff;
+        border-radius: 4px; border-width: 1px;
+        border-color: root.checked ? Theme.accent : Theme.border;
+        background: root.checked ? Theme.accent : transparent;
+        animate background { duration: 100ms; }
+        if root.checked: Text {
+            text: "✓"; font-size: 11px; font-weight: 700; color: #fff;
             horizontal-alignment: center; vertical-alignment: center;
         }
     }
@@ -150,7 +155,7 @@ component InlineField {
     in-out property <string> val;
     in property <bool>       editing;
     in property <bool>       multiline: false;
-    in property <length>     field-height: 34px;
+    in property <length>     field-height: 36px;
     callback changed(string);
 
     VerticalLayout {
@@ -162,17 +167,378 @@ component InlineField {
             border-width: 1px;
             border-color: root.editing ? Theme.accent-dim : Theme.border;
             animate background { duration: 130ms; }
-
             if root.editing: TextInput {
-                text <=> root.val; font-size: 15px; color: Theme.text-primary;
+                text <=> root.val; font-size: Theme.ui-font-size; color: Theme.text-primary;
                 x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px;
                 wrap: root.multiline ? word-wrap : no-wrap;
                 edited => { root.changed(self.text); }
             }
             if !root.editing: Text {
-                text: root.val == "" ? "—" : root.val; font-size: 15px;
+                text: root.val == "" ? "—" : root.val; font-size: Theme.ui-font-size;
                 color: root.val == "" ? Theme.text-muted : Theme.text-primary;
                 overflow: elide; vertical-alignment: center; x: 10px; width: parent.width - 20px;
+            }
+        }
+    }
+}
+
+// ─── Color Swatch ─────────────────────────────────────────────────────────────
+
+component ColorSwatch {
+    in property <color> swatch-color;
+    in property <bool>  selected;
+    callback clicked;
+    width: 28px; height: 28px;
+    t := TouchArea { clicked => { root.clicked(); } }
+    Rectangle {
+        border-radius: 6px; background: root.swatch-color;
+        border-width: root.selected ? 2px : (t.has-hover ? 1px : 0px);
+        border-color: root.selected ? Theme.text-primary : #ffffff60;
+        animate border-width { duration: 100ms; }
+        if root.selected: Text {
+            text: "✓"; font-size: 11px; font-weight: 700; color: #fff;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+    }
+}
+
+// ─── Icon Picker Button (reusable, avoids duplicate-id issue) ────────────────
+
+component IconPickerBtn {
+    in property <string> icon;
+    callback picked(string);
+    width: 36px; height: 36px;
+    btn-t := TouchArea {
+        clicked => { root.picked(root.icon); }
+        Rectangle {
+            border-radius: 6px;
+            background: btn-t.has-hover ? Theme.bg-elevated : transparent;
+            Text { text: root.icon; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+}
+
+// ─── Icon Picker ──────────────────────────────────────────────────────────────
+
+component IconPicker {
+    callback picked(string);
+    callback close();
+
+    property <[string]> icons: [
+        "📁","🎧","✒️","📷","🎮","📚","⌚","💍","🎸","🎨",
+        "🏆","🎯","🔬","🚀","🌿","🍷","⚽","🎲","💎","🖥",
+        "📻","🎺","🎻","🏺","🪙","🗝","🧲","🔭","🎠","🧸",
+        "🪴","🐾","🦋","🌊","🏔","🎭","🧩","🪆","🫙","📦",
+    ];
+
+    Rectangle {
+        background: #00000060; width: parent.width; height: parent.height;
+        TouchArea { clicked => { root.close(); } }
+    }
+    Rectangle {
+        x: (parent.width - 320px) / 2;
+        y: (parent.height - 300px) / 2;
+        width: 320px; height: 300px;
+        border-radius: 12px; background: Theme.bg-panel;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 24px; drop-shadow-color: #00000050;
+
+        VerticalLayout {
+            padding: 16px; spacing: 10px;
+            HorizontalLayout {
+                alignment: space-between; height: 30px;
+                Text { text: "Choose icon"; font-size: 14px; font-weight: 700; color: Theme.text-primary; vertical-alignment: center; }
+                close-t := TouchArea {
+                    width: 28px; height: 28px; clicked => { root.close(); }
+                    Rectangle {
+                        border-radius: 6px;
+                        background: close-t.has-hover ? Theme.bg-elevated : transparent;
+                        Text { text: "✕"; font-size: 14px; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout { spacing: 4px;
+                        for ico in ["📁","🎧","✒️","📷","🎮","📚","⌚","💍"]: IconPickerBtn { icon: ico; picked(i) => { root.picked(i); } }
+                    }
+                    HorizontalLayout { spacing: 4px;
+                        for ico in ["🎸","🎨","🏆","🎯","🔬","🚀","🌿","🍷"]: IconPickerBtn { icon: ico; picked(i) => { root.picked(i); } }
+                    }
+                    HorizontalLayout { spacing: 4px;
+                        for ico in ["⚽","🎲","💎","🖥","📻","🎺","🎻","🏺"]: IconPickerBtn { icon: ico; picked(i) => { root.picked(i); } }
+                    }
+                    HorizontalLayout { spacing: 4px;
+                        for ico in ["🪙","🗝","🧲","🔭","🎠","🧸","🪴","🐾"]: IconPickerBtn { icon: ico; picked(i) => { root.picked(i); } }
+                    }
+                    HorizontalLayout { spacing: 4px;
+                        for ico in ["🦋","🌊","🏔","🎭","🧩","🪆","🫙","📦"]: IconPickerBtn { icon: ico; picked(i) => { root.picked(i); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Template Picker ──────────────────────────────────────────────────────────
+
+component TemplatePicker {
+    in property <[TemplateData]> templates;
+    callback apply(string);
+    callback delete-template(string);
+    callback close();
+
+    Rectangle {
+        background: #00000060; width: parent.width; height: parent.height;
+        TouchArea { clicked => { root.close(); } }
+    }
+    Rectangle {
+        x: (parent.width - 340px) / 2;
+        y: (parent.height - 360px) / 2;
+        width: 340px; height: 360px;
+        border-radius: 12px; background: Theme.bg-panel;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 24px; drop-shadow-color: #00000050;
+
+        VerticalLayout {
+            padding: 16px; spacing: 10px;
+            HorizontalLayout {
+                alignment: space-between; height: 30px;
+                Text { text: "Field templates"; font-size: 14px; font-weight: 700; color: Theme.text-primary; vertical-alignment: center; }
+                close-t := TouchArea {
+                    width: 28px; height: 28px; clicked => { root.close(); }
+                    Rectangle {
+                        border-radius: 6px;
+                        background: close-t.has-hover ? Theme.bg-elevated : transparent;
+                        Text { text: "✕"; font-size: 14px; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+            if root.templates.length == 0: Rectangle {
+                height: 80px;
+                Text {
+                    text: "No templates yet.\nUse 'Save as template' on an item.";
+                    font-size: 12px; color: Theme.text-muted;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 6px;
+                    for tmpl in root.templates: HorizontalLayout {
+                        height: 54px; spacing: 8px; alignment: center;
+                        tmpl-t := TouchArea {
+                            horizontal-stretch: 1;
+                            clicked => { root.apply(tmpl.id); }
+                            Rectangle {
+                                border-radius: 8px;
+                                background: tmpl-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                                border-width: 1px; border-color: Theme.border;
+                                VerticalLayout {
+                                    padding: 8px; spacing: 2px;
+                                    Text { text: tmpl.name; font-size: 13px; font-weight: 600; color: Theme.text-primary; overflow: elide; }
+                                    Text { text: tmpl.field-labels; font-size: 11px; color: Theme.text-muted; overflow: elide; }
+                                }
+                            }
+                        }
+                        del-t := TouchArea {
+                            width: 28px; height: 28px;
+                            clicked => { root.delete-template(tmpl.id); }
+                            Rectangle {
+                                border-radius: 6px;
+                                background: del-t.has-hover ? Theme.danger-bg : transparent;
+                                Text { text: "🗑"; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Settings Panel ───────────────────────────────────────────────────────────
+
+component SettingsPanel {
+    in property <string> status-msg;
+    callback close();
+    callback toggle-dark-mode();
+    callback set-accent(color);
+    callback set-font-size(length);
+    callback export-data();
+    callback import-data();
+
+    property <[color]> accents: [
+        #4f8ef7, #7c5cbf, #2ecc71, #e67e22,
+        #e74c3c, #1abc9c, #e91e8c, #f0c040,
+    ];
+
+    Rectangle {
+        background: #00000060; width: parent.width; height: parent.height;
+        TouchArea { clicked => { root.close(); } }
+    }
+
+    Rectangle {
+        x: (parent.width - 400px) / 2;
+        y: (parent.height - 520px) / 2;
+        width: 400px; height: 520px;
+        border-radius: 14px; background: Theme.bg-panel;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 32px; drop-shadow-color: #00000060; drop-shadow-offset-y: 8px;
+
+        VerticalLayout {
+            padding: 24px; spacing: 0px;
+
+            // Header
+            HorizontalLayout {
+                alignment: space-between; height: 36px;
+                Text { text: "Settings"; font-size: 16px; font-weight: 700; color: Theme.text-primary; vertical-alignment: center; }
+                close-t := TouchArea {
+                    width: 28px; height: 28px; clicked => { root.close(); }
+                    Rectangle {
+                        border-radius: 6px;
+                        background: close-t.has-hover ? Theme.bg-elevated : transparent;
+                        animate background { duration: 100ms; }
+                        Text {
+                            text: "✕"; font-size: 14px; font-weight: 700;
+                            color: close-t.has-hover ? Theme.text-primary : Theme.text-secondary;
+                            horizontal-alignment: center; vertical-alignment: center;
+                            animate color { duration: 100ms; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 18px; }
+            SectionLabel { text: "APPEARANCE"; }
+            Rectangle { height: 10px; }
+
+            // Dark / Light
+            HorizontalLayout {
+                alignment: space-between; height: 36px;
+                Text { text: Theme.dark-mode ? "Dark mode" : "Light mode"; font-size: 13px; color: Theme.text-secondary; vertical-alignment: center; }
+                toggle-t := TouchArea {
+                    width: 48px; height: 26px; clicked => { root.toggle-dark-mode(); }
+                    Rectangle {
+                        border-radius: 13px;
+                        background: Theme.dark-mode ? Theme.accent : Theme.bg-elevated;
+                        border-width: 1px; border-color: Theme.border;
+                        animate background { duration: 200ms; }
+                        Rectangle {
+                            width: 18px; height: 18px; border-radius: 9px; background: #fff;
+                            x: Theme.dark-mode ? 26px : 4px; y: 3px;
+                            animate x { duration: 200ms; easing: ease-in-out; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 4px; }
+
+            // Accent
+            HorizontalLayout {
+                alignment: space-between; height: 36px;
+                Text { text: "Accent colour"; font-size: 13px; color: Theme.text-secondary; vertical-alignment: center; }
+                HorizontalLayout {
+                    spacing: 5px; alignment: center;
+                    for c in root.accents: ColorSwatch {
+                        swatch-color: c; selected: Theme.accent == c;
+                        clicked => { root.set-accent(c); }
+                    }
+                }
+            }
+
+            Rectangle { height: 4px; }
+
+            // Font size
+            HorizontalLayout {
+                alignment: space-between; height: 36px;
+                Text { text: "Font size"; font-size: 13px; color: Theme.text-secondary; vertical-alignment: center; }
+                HorizontalLayout {
+                    spacing: 4px; alignment: center;
+                    minus-t := TouchArea {
+                        width: 28px; height: 28px;
+                        clicked => { root.set-font-size(max(11px, Theme.ui-font-size - 1px)); }
+                        Rectangle {
+                            border-radius: 6px;
+                            background: minus-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                            border-width: 1px; border-color: Theme.border;
+                            Text { text: "−"; font-size: 16px; color: Theme.text-primary; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                    Rectangle {
+                        width: 36px; height: 28px; border-radius: 6px;
+                        background: Theme.bg-surface; border-width: 1px; border-color: Theme.border;
+                        Text { text: Theme.ui-font-size / 1px; font-size: 12px; color: Theme.text-primary; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    plus-t := TouchArea {
+                        width: 28px; height: 28px;
+                        clicked => { root.set-font-size(min(22px, Theme.ui-font-size + 1px)); }
+                        Rectangle {
+                            border-radius: 6px;
+                            background: plus-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                            border-width: 1px; border-color: Theme.border;
+                            Text { text: "+"; font-size: 16px; color: Theme.text-primary; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 16px; }
+            Rectangle { height: 1px; background: Theme.border; }
+            Rectangle { height: 16px; }
+            SectionLabel { text: "DATA"; }
+            Rectangle { height: 10px; }
+
+            export-t := TouchArea {
+                height: 48px; clicked => { root.export-data(); }
+                Rectangle {
+                    border-radius: 8px;
+                    background: export-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                    border-width: 1px; border-color: Theme.border;
+                    animate background { duration: 120ms; }
+                    HorizontalLayout {
+                        padding-left: 14px; spacing: 10px; alignment: center;
+                        Text { text: "↑"; font-size: 18px; color: Theme.accent; vertical-alignment: center; font-weight: 700; }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: "Export collection data"; font-size: 13px; color: Theme.text-primary; }
+                            Text { text: "Save as JSON backup"; font-size: 11px; color: Theme.text-muted; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 8px; }
+
+            import-t := TouchArea {
+                height: 48px; clicked => { root.import-data(); }
+                Rectangle {
+                    border-radius: 8px;
+                    background: import-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                    border-width: 1px; border-color: Theme.border;
+                    animate background { duration: 120ms; }
+                    HorizontalLayout {
+                        padding-left: 14px; spacing: 10px; alignment: center;
+                        Text { text: "↓"; font-size: 18px; color: Theme.accent; vertical-alignment: center; font-weight: 700; }
+                        VerticalLayout {
+                            alignment: center;
+                            Text { text: "Import collection data"; font-size: 13px; color: Theme.text-primary; }
+                            Text { text: "Merge from JSON file"; font-size: 11px; color: Theme.text-muted; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 12px; }
+
+            if root.status-msg != "": Rectangle {
+                height: 28px; border-radius: 6px; background: Theme.bg-surface;
+                Text { text: root.status-msg; font-size: 11px; color: Theme.accent-text; x: 10px; vertical-alignment: center; }
             }
         }
     }
@@ -182,8 +548,12 @@ component InlineField {
 
 component CollectionRow {
     in property <CollectionData> data;
-    in property <bool>           selected;
+    in property <bool>  selected;
+    in property <bool>  checked: false;
+    in property <bool>  multi-select-mode: false;
     callback clicked;
+    callback icon-clicked;
+    callback check-toggled;
 
     height: 52px;
     t := TouchArea { clicked => { root.clicked(); } }
@@ -201,31 +571,41 @@ component CollectionRow {
         }
 
         HorizontalLayout {
-            padding-left: 14px; padding-right: 10px; spacing: 10px; alignment: center;
+            padding-left: 10px; padding-right: 10px; spacing: 8px; alignment: center;
 
-            Rectangle {
-                width: 30px; height: 30px; border-radius: 8px;
-                background: root.selected ? Theme.accent-dim : Theme.bg-elevated;
-                animate background { duration: 140ms; }
-                Text { text: root.data.icon; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; }
+            if root.multi-select-mode: Checkbox {
+                checked: root.checked;
+                toggled => { root.check-toggled(); }
+            }
+
+            icon-t := TouchArea {
+                width: 32px; height: 32px; clicked => { root.icon-clicked(); }
+                Rectangle {
+                    border-radius: 8px;
+                    background: root.selected ? Theme.accent-dim : Theme.bg-elevated;
+                    border-width: icon-t.has-hover ? 1px : 0px;
+                    border-color: Theme.accent;
+                    animate background { duration: 140ms; }
+                    Text { text: root.data.icon; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                }
             }
 
             VerticalLayout {
                 alignment: center; spacing: 2px;
                 Text {
-                    text: root.data.name; font-size: 15px; overflow: elide;
+                    text: root.data.name; font-size: Theme.ui-font-size; overflow: elide;
                     font-weight: root.selected ? 600 : 400;
                     color: root.selected ? Theme.text-primary : Theme.text-secondary;
                 }
-                Text { text: root.data.item-count + " items"; font-size: 12px; color: Theme.text-muted; }
+                Text {
+                    text: root.data.item-count + " items";
+                    font-size: max(10px, Theme.ui-font-size - 3px); color: Theme.text-muted;
+                }
             }
 
-            if root.selected: Rectangle {
+            if root.selected && !root.multi-select-mode: Rectangle {
                 width: 22px; height: 16px; border-radius: 8px; background: Theme.accent;
-                Text {
-                    text: root.data.item-count; font-size: 9px; font-weight: 700;
-                    color: #fff; horizontal-alignment: center; vertical-alignment: center;
-                }
+                Text { text: root.data.item-count; font-size: 9px; font-weight: 700; color: #fff; horizontal-alignment: center; vertical-alignment: center; }
             }
         }
     }
@@ -235,10 +615,13 @@ component CollectionRow {
 
 component ItemCard {
     in property <ItemData> data;
-    in property <bool>     selected;
+    in property <bool>  selected;
+    in property <bool>  checked: false;
+    in property <bool>  multi-select-mode: false;
     callback clicked;
+    callback check-toggled;
 
-    height: 78px;
+    height: 80px;
     t := TouchArea { clicked => { root.clicked(); } }
 
     Rectangle {
@@ -249,157 +632,39 @@ component ItemCard {
         animate background { duration: 140ms; }
 
         HorizontalLayout {
-            padding: 10px; spacing: 11px; alignment: center;
+            padding: 10px; spacing: 10px; alignment: center;
 
-            // Thumbnail
+            if root.multi-select-mode: Checkbox {
+                checked: root.checked;
+                toggled => { root.check-toggled(); }
+            }
+
             Rectangle {
-                width: 54px; height: 54px; border-radius: 8px;
+                width: 56px; height: 56px; border-radius: 8px;
                 background: Theme.bg-elevated;
-
                 if !root.data.has-photo: Text {
-                    text: "📷"; font-size: 22px;
+                    text: "📷"; font-size: 24px;
                     horizontal-alignment: center; vertical-alignment: center;
                     color: Theme.text-muted;
                 }
                 if root.data.has-photo: Image {
                     source: root.data.thumbnail;
-                    width: 54px; height: 54px;
-                    image-fit: cover;
+                    width: 56px; height: 56px; image-fit: cover;
                 }
             }
 
             VerticalLayout {
                 alignment: center; spacing: 4px;
                 Text {
-                    text: root.data.name; font-size: 15px; font-weight: 600; overflow: elide;
+                    text: root.data.name; font-size: Theme.ui-font-size; font-weight: 600; overflow: elide;
                     color: root.selected ? Theme.text-primary : Theme.text-secondary;
                 }
-                Text { text: root.data.short-desc; font-size: 13px; color: Theme.text-muted; overflow: elide; wrap: no-wrap; }
-            }
-        }
-    }
-}
-
-// ─── Settings Panel ───────────────────────────────────────────────────────────
-
-component SettingsPanel {
-    callback close();
-    callback toggle-dark-mode();
-    callback set-accent(color);
-    callback export-data();
-    callback import-data();
-
-    property <[color]> accents: [
-        #4f8ef7, #7c5cbf, #2ecc71, #e67e22,
-        #e74c3c, #1abc9c, #e91e8c, #f0c040,
-    ];
-
-    Rectangle { background: Theme.bg-base; opacity: 0.55; width: parent.width; height: parent.height; }
-
-    Rectangle {
-        x: (parent.width - 380px) / 2;
-        y: (parent.height - 440px) / 2;
-        width: 380px; height: 440px;
-        border-radius: 14px; background: Theme.bg-panel;
-        border-width: 1px; border-color: Theme.border;
-        drop-shadow-blur: 32px; drop-shadow-color: #00000060; drop-shadow-offset-y: 8px;
-
-        VerticalLayout {
-            padding: 24px; spacing: 0px;
-
-            HorizontalLayout {
-                alignment: space-between; height: 36px;
-                Text { text: "Settings"; font-size: 16px; font-weight: 700; color: Theme.text-primary; vertical-alignment: center; }
-                IconBtn { label: "✕"; clicked => { root.close(); } }
-            }
-
-            Rectangle { height: 20px; }
-            SectionLabel { text: "APPEARANCE"; }
-            Rectangle { height: 10px; }
-
-            HorizontalLayout {
-                alignment: space-between; height: 40px;
-                Text { text: Theme.dark-mode ? "Dark mode" : "Light mode"; font-size: 13px; color: Theme.text-secondary; vertical-alignment: center; }
-                toggle-t := TouchArea {
-                    width: 48px; height: 26px;
-                    clicked => { root.toggle-dark-mode(); }
-                    Rectangle {
-                        border-radius: 13px;
-                        background: Theme.dark-mode ? Theme.accent : Theme.bg-elevated;
-                        border-width: 1px; border-color: Theme.border;
-                        animate background { duration: 200ms; }
-                        Rectangle {
-                            width: 18px; height: 18px; border-radius: 9px; background: #fff;
-                            x: Theme.dark-mode ? 26px : 4px; y: 3px;
-                            animate x { duration: 200ms; easing: ease-in-out; }
-                        }
-                    }
+                Text {
+                    text: root.data.short-desc;
+                    font-size: max(10px, Theme.ui-font-size - 2px);
+                    color: Theme.text-muted; overflow: elide; wrap: no-wrap;
                 }
             }
-
-            Rectangle { height: 6px; }
-
-            HorizontalLayout {
-                alignment: space-between; height: 40px;
-                Text { text: "Accent colour"; font-size: 13px; color: Theme.text-secondary; vertical-alignment: center; }
-                HorizontalLayout {
-                    spacing: 5px; alignment: center;
-                    for c in root.accents: ColorSwatch {
-                        swatch-color: c; selected: Theme.accent == c;
-                        clicked => { root.set-accent(c); }
-                    }
-                }
-            }
-
-            Rectangle { height: 20px; }
-            Rectangle { height: 1px; background: Theme.border; }
-            Rectangle { height: 20px; }
-            SectionLabel { text: "DATA"; }
-            Rectangle { height: 12px; }
-
-            export-t := TouchArea {
-                height: 42px;
-                clicked => { root.export-data(); }
-                Rectangle {
-                    border-radius: 8px;
-                    background: export-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
-                    border-width: 1px; border-color: Theme.border;
-                    animate background { duration: 120ms; }
-                    HorizontalLayout {
-                        padding-left: 14px; spacing: 10px; alignment: center;
-                        Text { text: "⬆"; font-size: 16px; color: Theme.accent; vertical-alignment: center; }
-                        VerticalLayout {
-                            alignment: center;
-                            Text { text: "Export collection data"; font-size: 13px; color: Theme.text-primary; }
-                            Text { text: "Save as JSON backup"; font-size: 11px; color: Theme.text-muted; }
-                        }
-                    }
-                }
-            }
-
-            Rectangle { height: 8px; }
-
-            import-t := TouchArea {
-                height: 42px;
-                clicked => { root.import-data(); }
-                Rectangle {
-                    border-radius: 8px;
-                    background: import-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
-                    border-width: 1px; border-color: Theme.border;
-                    animate background { duration: 120ms; }
-                    HorizontalLayout {
-                        padding-left: 14px; spacing: 10px; alignment: center;
-                        Text { text: "⬇"; font-size: 16px; color: Theme.accent; vertical-alignment: center; }
-                        VerticalLayout {
-                            alignment: center;
-                            Text { text: "Import collection data"; font-size: 13px; color: Theme.text-primary; }
-                            Text { text: "Merge from JSON file"; font-size: 11px; color: Theme.text-muted; }
-                        }
-                    }
-                }
-            }
-
-            Rectangle { height: 14px; }
         }
     }
 }
@@ -408,19 +673,23 @@ component SettingsPanel {
 
 export component AppWindow inherits Window {
     title: "Collector";
-    min-width: 780px; min-height: 520px;
+    min-width: 820px; min-height: 540px;
     preferred-width: 1200px; preferred-height: 760px;
     background: Theme.bg-base;
 
     in-out property <length> left-width: 220px;
     in-out property <length> mid-width:  268px;
 
-    // App state
+    // State
     in-out property <[CollectionData]> collections: [];
     in-out property <[ItemData]>       items: [];
     in-out property <[FieldData]>      detail-fields: [];
+    in-out property <[TemplateData]>   templates: [];
+    in-out property <[CheckedItem]>    coll-checked: [];
+    in-out property <[CheckedItem]>    item-checked: [];
     in-out property <int>    selected-collection: -1;
     in-out property <int>    selected-item: -1;
+    in-out property <string> search-text: "";
     in-out property <string> detail-name: "";
     in-out property <string> detail-desc: "";
     in-out property <string> detail-notes: "";
@@ -429,9 +698,12 @@ export component AppWindow inherits Window {
     in-out property <string> detail-value: "";
     in-out property <string> detail-tags: "";
     in-out property <bool>   detail-has-photo: false;
-    in-out property <image>  detail-photo;         // loaded by Rust
+    in-out property <image>  detail-photo;
     in-out property <bool>   is-editing: false;
     in-out property <bool>   show-settings: false;
+    in-out property <bool>   show-icon-picker: false;
+    in-out property <bool>   show-template-picker: false;
+    in-out property <bool>   multi-select-mode: false;
     in-out property <string> status-message: "";
 
     // Callbacks
@@ -441,6 +713,7 @@ export component AppWindow inherits Window {
     callback delete-collection(int);
     callback new-item();
     callback delete-item(int);
+    callback delete-selected-items();
     callback toggle-edit();
     callback pick-photo();
     callback field-changed(string, string);
@@ -448,13 +721,22 @@ export component AppWindow inherits Window {
     callback resize-mid(length);
     callback toggle-dark-mode();
     callback set-accent(color);
+    callback set-font-size(length);
     callback export-data();
     callback import-data();
-    // Custom fields
+    callback search-changed(string);
+    callback collection-icon-clicked(int);
+    callback icon-picked(string);
     callback add-custom-field();
-    callback delete-custom-field(string);           // field id
-    callback custom-field-label-changed(string, string);  // (field-id, new-label)
-    callback custom-field-value-changed(string, string);  // (field-id, new-value)
+    callback delete-custom-field(string);
+    callback custom-field-label-changed(string, string);
+    callback custom-field-value-changed(string, string);
+    callback save-as-template();
+    callback apply-template(string);
+    callback delete-template(string);
+    callback toggle-multi-select();
+    callback toggle-coll-check(int);
+    callback toggle-item-check(int);
 
     HorizontalLayout {
         spacing: 0px;
@@ -465,8 +747,9 @@ export component AppWindow inherits Window {
             background: Theme.bg-panel;
 
             VerticalLayout {
-                padding: 14px; padding-top: 18px; spacing: 0px;
+                padding: 14px; padding-top: 18px; spacing: 6px;
 
+                // Header
                 HorizontalLayout {
                     alignment: space-between; height: 38px;
                     Text { text: "Collections"; font-size: 10px; letter-spacing: 1.6px; font-weight: 700; color: Theme.text-muted; vertical-alignment: center; }
@@ -477,39 +760,65 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle { height: 8px; }
-
+                // Collection list
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
                         spacing: 2px; padding-right: 4px;
                         for coll[i] in root.collections: CollectionRow {
-                            data: coll; selected: root.selected-collection == i;
+                            data: coll;
+                            selected: root.selected-collection == i;
+                            multi-select-mode: root.multi-select-mode;
+                            checked: root.coll-checked.length > i && root.coll-checked[i].checked;
                             clicked => { root.select-collection(i); }
+                            icon-clicked => { root.collection-icon-clicked(i); }
+                            check-toggled => { root.toggle-coll-check(i); }
                         }
                         if root.collections.length == 0: Rectangle {
                             height: 140px;
                             VerticalLayout {
-                                alignment: center; spacing: 6px;
-                                Text { text: "🗂"; font-size: 40px; horizontal-alignment: center; color: Theme.text-muted; }
+                                alignment: center; spacing: 8px;
+                                // Fixed container prevents emoji clipping
+                                Rectangle { height: 52px; width: 52px;
+                                    Text { text: "🗂"; font-size: 40px; horizontal-alignment: center; vertical-alignment: center; color: Theme.text-muted; }
+                                }
                                 Text { text: "Press + to create\na collection"; font-size: 11px; color: Theme.text-muted; horizontal-alignment: center; }
                             }
                         }
                     }
                 }
 
-                if root.selected-collection >= 0: del-coll-t := TouchArea {
-                    height: 36px;
-                    clicked => { root.delete-collection(root.selected-collection); }
-                    Rectangle {
-                        border-radius: 7px; border-width: 1px; border-color: #3d1515; background: transparent;
-                        HorizontalLayout {
-                            alignment: center; spacing: 6px;
-                            Text { text: "🗑"; font-size: 12px; vertical-alignment: center; color: Theme.danger-text; }
+                // Bottom actions
+                VerticalLayout {
+                    spacing: 4px;
+
+                    ms-t := TouchArea {
+                        height: 30px; clicked => { root.toggle-multi-select(); }
+                        Rectangle {
+                            border-radius: 6px;
+                            background: root.multi-select-mode ? Theme.accent-dim : (ms-t.has-hover ? Theme.bg-elevated : transparent);
+                            border-width: root.multi-select-mode ? 1px : 0px;
+                            border-color: Theme.border-accent;
                             Text {
-                                text: "Delete collection"; font-size: 11px; vertical-alignment: center;
-                                color: del-coll-t.has-hover ? Theme.danger-text : #9b3b3b;
-                                animate color { duration: 120ms; }
+                                text: root.multi-select-mode ? "✓ Multi-select on" : "  Multi-select";
+                                font-size: 11px; color: root.multi-select-mode ? Theme.accent-text : Theme.text-muted;
+                                vertical-alignment: center; horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    if root.selected-collection >= 0 && !root.multi-select-mode: del-coll-t := TouchArea {
+                        height: 30px; clicked => { root.delete-collection(root.selected-collection); }
+                        Rectangle {
+                            border-radius: 6px; border-width: 1px; border-color: #3d1515; background: transparent;
+                            HorizontalLayout {
+                                alignment: center; spacing: 6px;
+                                Text { text: "🗑"; font-size: 12px; vertical-alignment: center; color: Theme.danger-text; }
+                                Text {
+                                    text: "Delete collection"; font-size: 11px; vertical-alignment: center;
+                                    color: del-coll-t.has-hover ? Theme.danger-text : #9b3b3b;
+                                    animate color { duration: 120ms; }
+                                }
                             }
                         }
                     }
@@ -530,8 +839,9 @@ export component AppWindow inherits Window {
             background: Theme.bg-base;
 
             VerticalLayout {
-                padding: 14px; padding-top: 18px; spacing: 0px;
+                padding: 14px; padding-top: 18px; spacing: 6px;
 
+                // Header
                 HorizontalLayout {
                     alignment: space-between; height: 38px;
                     Text {
@@ -541,33 +851,80 @@ export component AppWindow inherits Window {
                         font-size: 15px; font-weight: 700; color: Theme.text-primary;
                         vertical-alignment: center; overflow: elide;
                     }
-                    if root.selected-collection >= 0: IconBtn { label: "+"; clicked => { root.new-item(); } }
+                    HorizontalLayout {
+                        spacing: 4px; alignment: center;
+                        if root.selected-collection >= 0 && root.multi-select-mode: del-items-t := TouchArea {
+                            width: 70px; height: 26px;
+                            clicked => { root.delete-selected-items(); }
+                            Rectangle {
+                                border-radius: 6px; background: del-items-t.has-hover ? Theme.danger-bg : transparent;
+                                border-width: 1px; border-color: #3d1515;
+                                Text { text: "🗑 Delete"; font-size: 11px; color: Theme.danger-text; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        if root.selected-collection >= 0: IconBtn { label: "+"; clicked => { root.new-item(); } }
+                    }
                 }
 
-                Rectangle { height: 10px; }
+                // Search
+                if root.selected-collection >= 0: Rectangle {
+                    height: 32px; border-radius: 8px;
+                    background: Theme.bg-surface; border-width: 1px; border-color: Theme.border;
+                    HorizontalLayout {
+                        padding-left: 10px; spacing: 6px; alignment: center;
+                        Text { text: "🔍"; font-size: 12px; color: Theme.text-muted; vertical-alignment: center; }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            // Placeholder text shown when empty
+                            if root.search-text == "": Text {
+                                text: "Search items..."; font-size: 12px;
+                                color: Theme.text-muted; vertical-alignment: center;
+                            }
+                            TextInput {
+                                text <=> root.search-text;
+                                font-size: 12px; color: Theme.text-primary;
+                                vertical-alignment: center;
+                                width: parent.width;
+                                edited => { root.search-changed(self.text); }
+                            }
+                        }
+                    }
+                }
 
+                // Empty state (no collection selected)
                 if root.selected-collection < 0: Rectangle {
                     vertical-stretch: 1;
                     VerticalLayout {
                         alignment: center; spacing: 8px;
-                        Text { text: "←"; font-size: 40px; horizontal-alignment: center; color: Theme.text-muted; }
+                        Rectangle {
+                            height: 56px;
+                            Text { text: "←"; font-size: 48px; horizontal-alignment: center; vertical-alignment: center; color: Theme.text-muted; }
+                        }
                         Text { text: "Select a collection"; font-size: 13px; color: Theme.text-muted; horizontal-alignment: center; }
                     }
                 }
 
+                // Item list
                 if root.selected-collection >= 0: ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
                         spacing: 5px; padding-right: 4px;
                         for item[i] in root.items: ItemCard {
-                            data: item; selected: root.selected-item == i;
+                            data: item;
+                            selected: root.selected-item == i;
+                            multi-select-mode: root.multi-select-mode;
+                            checked: root.item-checked.length > i && root.item-checked[i].checked;
                             clicked => { root.select-item(i); }
+                            check-toggled => { root.toggle-item-check(i); }
                         }
                         if root.items.length == 0: Rectangle {
                             height: 140px;
                             VerticalLayout {
-                                alignment: center; spacing: 6px;
-                                Text { text: "📦"; font-size: 40px; horizontal-alignment: center; color: Theme.text-muted; }
+                                alignment: center; spacing: 8px;
+                                Rectangle {
+                                    height: 56px;
+                                    Text { text: "📦"; font-size: 48px; horizontal-alignment: center; vertical-alignment: center; color: Theme.text-muted; }
+                                }
                                 Text { text: "Press + to add an item"; font-size: 12px; color: Theme.text-muted; horizontal-alignment: center; }
                             }
                         }
@@ -583,16 +940,28 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ══ RIGHT PANEL — Detail ══════════════════════════════════════════════
+        // ══ RIGHT PANEL ═══════════════════════════════════════════════════════
         Rectangle {
             horizontal-stretch: 1;
             background: Theme.bg-panel;
 
+            // Status bar at bottom (always visible)
+            if root.status-message != "": Rectangle {
+                y: parent.height - 36px;
+                height: 36px; width: parent.width;
+                background: Theme.bg-surface;
+                border-width: 1px; border-color: Theme.border;
+                Text { text: root.status-message; font-size: 11px; color: Theme.accent-text; x: 14px; vertical-alignment: center; }
+            }
+
             if root.selected-item < 0: Rectangle {
                 VerticalLayout {
                     alignment: center; spacing: 10px;
-                    Text { text: "🔍"; font-size: 40px; horizontal-alignment: center; color: Theme.text-muted; }
-                    Text { text: "Select an item to view its details"; font-size: 13px; color: Theme.text-muted; horizontal-alignment: center; }
+                    Rectangle {
+                        height: 56px;
+                        Text { text: "🔍"; font-size: 48px; horizontal-alignment: center; vertical-alignment: center; color: Theme.text-muted; }
+                    }
+                    Text { text: "Select an item to view details"; font-size: 13px; color: Theme.text-muted; horizontal-alignment: center; }
                 }
             }
 
@@ -610,8 +979,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 5px; alignment: center;
                         save-t := TouchArea {
-                            width: 82px; height: 28px;
-                            clicked => { root.toggle-edit(); }
+                            width: 82px; height: 28px; clicked => { root.toggle-edit(); }
                             Rectangle {
                                 border-radius: 7px;
                                 background: root.is-editing ? Theme.accent : Theme.bg-elevated;
@@ -619,7 +987,7 @@ export component AppWindow inherits Window {
                                 border-color: root.is-editing ? Theme.accent : Theme.border;
                                 animate background { duration: 140ms; }
                                 Text {
-                                    text: root.is-editing ? "💾  Save" : "✏  Edit";
+                                    text: root.is-editing ? "💾 Save" : "✏ Edit";
                                     font-size: 12px; font-weight: 600;
                                     color: root.is-editing ? #fff : Theme.text-secondary;
                                     horizontal-alignment: center; vertical-alignment: center;
@@ -632,31 +1000,25 @@ export component AppWindow inherits Window {
 
                 Rectangle { height: 14px; }
 
-                // Photo + name/desc row
+                // Photo + name/desc
                 HorizontalLayout {
                     spacing: 18px; height: 152px;
 
-                    // Photo box
-                    photo-box := Rectangle {
+                    Rectangle {
                         width: 140px; height: 140px; border-radius: 11px;
                         background: Theme.bg-surface; border-width: 1px; border-color: Theme.border;
                         clip: true;
 
-                        // Placeholder when no photo
                         if !root.detail-has-photo: VerticalLayout {
                             alignment: center; spacing: 5px;
-                            Text { text: "📷"; font-size: 32px; horizontal-alignment: center; color: Theme.text-muted; }
+                            // Extra padding so emoji doesn't clip against rounded corners
+                            Rectangle { height: 8px; }
+                            Text { text: "📷"; font-size: 36px; horizontal-alignment: center; color: Theme.text-muted; }
                             if root.is-editing: Text { text: "Click to add photo"; font-size: 9px; color: Theme.text-muted; horizontal-alignment: center; }
                         }
-
-                        // Actual photo
                         if root.detail-has-photo: Image {
-                            source: root.detail-photo;
-                            width: 140px; height: 140px;
-                            image-fit: cover;
+                            source: root.detail-photo; width: 140px; height: 140px; image-fit: cover;
                         }
-
-                        // Overlay button in edit mode
                         if root.is-editing: photo-touch := TouchArea {
                             clicked => { root.pick-photo(); }
                             Rectangle {
@@ -671,7 +1033,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Name + description
                     VerticalLayout {
                         alignment: start; spacing: 10px;
 
@@ -679,18 +1040,18 @@ export component AppWindow inherits Window {
                             spacing: 3px;
                             SectionLabel { text: "NAME"; }
                             Rectangle {
-                                height: 34px; border-radius: 6px;
+                                height: 36px; border-radius: 6px;
                                 background: root.is-editing ? Theme.bg-input : transparent;
                                 border-width: root.is-editing ? 1px : 0px;
                                 border-color: Theme.accent-dim;
                                 animate background { duration: 130ms; }
                                 if root.is-editing: TextInput {
-                                    text <=> root.detail-name; font-size: 16px; font-weight: 600;
+                                    text <=> root.detail-name; font-size: Theme.ui-font-size + 1px; font-weight: 600;
                                     color: Theme.text-primary; x: 10px; y: 8px; width: parent.width - 20px;
                                     edited => { root.field-changed("name", self.text); }
                                 }
                                 if !root.is-editing: Text {
-                                    text: root.detail-name; font-size: 16px; font-weight: 600;
+                                    text: root.detail-name; font-size: Theme.ui-font-size + 1px; font-weight: 600;
                                     color: Theme.text-primary; vertical-alignment: center; x: 2px;
                                 }
                             }
@@ -706,14 +1067,14 @@ export component AppWindow inherits Window {
                                 border-color: Theme.accent-dim;
                                 animate background { duration: 130ms; }
                                 if root.is-editing: TextInput {
-                                    text <=> root.detail-desc; font-size: 14px; color: Theme.text-secondary;
+                                    text <=> root.detail-desc; font-size: Theme.ui-font-size; color: Theme.text-secondary;
                                     x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px;
                                     wrap: word-wrap;
                                     edited => { root.field-changed("desc", self.text); }
                                 }
                                 if !root.is-editing: Text {
                                     text: root.detail-desc == "" ? "No description" : root.detail-desc;
-                                    font-size: 14px;
+                                    font-size: Theme.ui-font-size;
                                     color: root.detail-desc == "" ? Theme.text-muted : Theme.text-secondary;
                                     wrap: word-wrap; x: 2px; width: parent.width - 4px;
                                 }
@@ -722,17 +1083,35 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle { height: 16px; }
-                Rectangle { height: 1px; background: Theme.border; }
                 Rectangle { height: 14px; }
+                Rectangle { height: 1px; background: Theme.border; }
+                Rectangle { height: 12px; }
 
-                // Details header + Add Field button
+                // Details header
                 HorizontalLayout {
-                    alignment: space-between; height: 22px;
+                    alignment: space-between; height: 26px;
                     SectionLabel { text: "DETAILS"; }
-                    if root.is-editing: IconBtn {
-                        label: "+ Field"; btn-width: 56px;
-                        clicked => { root.add-custom-field(); }
+                    if root.is-editing: HorizontalLayout {
+                        spacing: 4px; alignment: center;
+                        tmpl-t := TouchArea {
+                            width: 96px; height: 22px;
+                            clicked => { root.show-template-picker = true; }
+                            Rectangle {
+                                border-radius: 5px; background: tmpl-t.has-hover ? Theme.bg-elevated : Theme.bg-surface;
+                                border-width: 1px; border-color: Theme.border;
+                                Text { text: "Load template"; font-size: 10px; color: Theme.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        save-tmpl-t := TouchArea {
+                            width: 104px; height: 22px;
+                            clicked => { root.save-as-template(); }
+                            Rectangle {
+                                border-radius: 5px; background: save-tmpl-t.has-hover ? Theme.accent-dim : Theme.bg-surface;
+                                border-width: 1px; border-color: Theme.border;
+                                Text { text: "Save as template"; font-size: 10px; color: Theme.accent-text; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                        IconBtn { label: "+ Field"; btn-width: 58px; clicked => { root.add-custom-field(); } }
                     }
                 }
 
@@ -744,12 +1123,11 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 10px;
 
-                        // Standard fields row
                         HorizontalLayout {
-                            spacing: 12px; height: 58px;
-                            InlineField { field-label: "ACQUIRED";     val <=> root.detail-acquired;  editing: root.is-editing; changed(v) => { root.field-changed("acquired",  v); } }
-                            InlineField { field-label: "CONDITION";    val <=> root.detail-condition; editing: root.is-editing; changed(v) => { root.field-changed("condition", v); } }
-                            InlineField { field-label: "VALUE / PRICE"; val <=> root.detail-value;   editing: root.is-editing; changed(v) => { root.field-changed("value",     v); } }
+                            spacing: 12px; height: 60px;
+                            InlineField { field-label: "ACQUIRED";      val <=> root.detail-acquired;  editing: root.is-editing; changed(v) => { root.field-changed("acquired",  v); } }
+                            InlineField { field-label: "CONDITION";     val <=> root.detail-condition; editing: root.is-editing; changed(v) => { root.field-changed("condition", v); } }
+                            InlineField { field-label: "VALUE / PRICE"; val <=> root.detail-value;    editing: root.is-editing; changed(v) => { root.field-changed("value",     v); } }
                         }
 
                         InlineField { field-label: "TAGS"; val <=> root.detail-tags; editing: root.is-editing; changed(v) => { root.field-changed("tags", v); } }
@@ -760,78 +1138,87 @@ export component AppWindow inherits Window {
                             changed(v) => { root.field-changed("notes", v); }
                         }
 
-                        // Custom fields — editable label + value when in edit mode
+                        // Custom fields
                         for f in root.detail-fields: VerticalLayout {
-                            height: 68px;
-                            spacing: 3px;
+                            height: 70px; spacing: 3px;
 
-                            // Label row
                             HorizontalLayout {
                                 height: 22px; spacing: 4px; alignment: space-between;
-
                                 if root.is-editing: TextInput {
                                     text: f.label;
-                                    font-size: 11px; letter-spacing: 1.5px; font-weight: 600;
+                                    font-size: max(9px, Theme.ui-font-size - 4px);
+                                    letter-spacing: 1.5px; font-weight: 600;
                                     color: Theme.text-muted;
-                                    horizontal-stretch: 1;
-                                    vertical-alignment: center;
+                                    horizontal-stretch: 1; vertical-alignment: center;
                                     edited => { root.custom-field-label-changed(f.id, self.text); }
                                 }
                                 if !root.is-editing: Text {
-                                    text: f.label; font-size: 11px; letter-spacing: 1.5px;
-                                    font-weight: 600; color: Theme.text-muted;
+                                    text: f.label;
+                                    font-size: max(9px, Theme.ui-font-size - 4px);
+                                    letter-spacing: 1.5px; font-weight: 600; color: Theme.text-muted;
                                     horizontal-stretch: 1; vertical-alignment: center;
                                 }
-
-                                if root.is-editing: IconBtn {
-                                    label: "✕"; danger: true; btn-width: 22px;
+                                if root.is-editing: del-f-t := TouchArea {
+                                    width: 22px; height: 22px;
                                     clicked => { root.delete-custom-field(f.id); }
+                                    Rectangle {
+                                        border-radius: 4px;
+                                        background: del-f-t.has-hover ? Theme.danger-bg : transparent;
+                                        Text { text: "✕"; font-size: 11px; color: Theme.danger-text; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
                                 }
                             }
 
-                            // Value
                             Rectangle {
-                                height: 34px; border-radius: 6px;
+                                height: 36px; border-radius: 6px;
                                 background: root.is-editing ? Theme.bg-input : Theme.bg-surface;
                                 border-width: 1px;
                                 border-color: root.is-editing ? Theme.accent-dim : Theme.border;
                                 animate background { duration: 130ms; }
-
                                 if root.is-editing: TextInput {
-                                    text: f.value; font-size: 15px; color: Theme.text-primary;
-                                    x: 10px; y: 8px;
-                                    height: parent.height - 16px;
-                                    horizontal-stretch: 1;
+                                    text: f.value; font-size: Theme.ui-font-size; color: Theme.text-primary;
+                                    x: 10px; y: 8px; height: parent.height - 16px; horizontal-stretch: 1;
                                     edited => { root.custom-field-value-changed(f.id, self.text); }
                                 }
                                 if !root.is-editing: Text {
-                                    text: f.value == "" ? "—" : f.value; font-size: 15px;
+                                    text: f.value == "" ? "—" : f.value; font-size: Theme.ui-font-size;
                                     color: f.value == "" ? Theme.text-muted : Theme.text-primary;
                                     vertical-alignment: center; x: 10px;
                                 }
                             }
                         }
 
-                        Rectangle { height: 16px; }
+                        Rectangle { height: 20px; }
                     }
-                }
-
-                // Status bar
-                if root.status-message != "": Rectangle {
-                    height: 28px; border-radius: 6px; background: Theme.bg-surface;
-                    Text { text: root.status-message; font-size: 11px; color: Theme.accent-text; x: 10px; vertical-alignment: center; }
                 }
             }
         }
     }
 
-    // Settings overlay
+    // ── Overlays ──────────────────────────────────────────────────────────────
+
     if root.show-settings: SettingsPanel {
         width: root.width; height: root.height;
+        status-msg: root.status-message;
         close => { root.show-settings = false; }
         toggle-dark-mode => { root.toggle-dark-mode(); }
         set-accent(c) => { root.set-accent(c); }
-        export-data => { root.export-data(); root.show-settings = false; }
-        import-data => { root.import-data(); root.show-settings = false; }
+        set-font-size(s) => { root.set-font-size(s); }
+        export-data => { root.export-data(); }
+        import-data => { root.import-data(); }
+    }
+
+    if root.show-icon-picker: IconPicker {
+        width: root.width; height: root.height;
+        close => { root.show-icon-picker = false; }
+        picked(ico) => { root.icon-picked(ico); root.show-icon-picker = false; }
+    }
+
+    if root.show-template-picker: TemplatePicker {
+        width: root.width; height: root.height;
+        templates: root.templates;
+        close => { root.show-template-picker = false; }
+        apply(id) => { root.apply-template(id); root.show-template-picker = false; }
+        delete-template(id) => { root.delete-template(id); }
     }
 }
