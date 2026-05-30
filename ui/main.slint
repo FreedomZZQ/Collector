@@ -110,9 +110,9 @@ component SmallBtn {
     in property <string> label;
     in property <bool>   danger: false;
     in property <bool>   active: false;
-    in property <length> btn-width: 28px;
+    in property <length> btn-width: 30px;
     callback clicked;
-    width: btn-width; height: 28px;
+    width: btn-width; height: 30px;
     t := TouchArea { clicked => { root.clicked(); } }
     Rectangle {
         border-radius: 6px;
@@ -121,7 +121,9 @@ component SmallBtn {
         animate background { duration: 120ms; }
         Text {
             text: root.label;
+            font-family: "Segoe UI Emoji";
             font-size: Theme.ui-font-size - 2px;
+            width: parent.width; height: parent.height;
             color: root.active ? #fff
                  : (t.has-hover ? (root.danger ? Theme.danger-text : Theme.text-primary)
                                 : Theme.text-secondary);
