@@ -1,7 +1,7 @@
-# Collector 🗂  — v0.2
+# Collector
 
-A lightweight, native desktop app for cataloguing personal collections.  
-Built with **Rust + Slint**: single binary, no runtime, no cloud.
+A lightweight, native desktop app for cataloguing personal collections. I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience.
+Built with **Rust + Slint** and written by Claude, Opus 4.8.
 
 ---
 
@@ -73,36 +73,6 @@ Two files are written: `data.json` (collections + items) and `settings.json` (th
 
 Export writes the full `AppData` JSON to `~/Documents/collector-export.json`.  
 Import reads from the same path and **merges** — existing items (matched by UUID) are not overwritten, so you can safely import old backups without losing edits.
-
-### Enabling a native file picker (Save As / Open dialog)
-
-1. Add to `Cargo.toml`:
-   ```toml
-   rfd = "0.14"
-   ```
-2. In `src/main.rs`, find the three `// With rfd enabled, you'd use:` comments and uncomment those blocks.  
-   They replace the hard-coded `~/Documents/collector-export.json` paths with native OS dialogs.
-
----
-
-## Enabling Photos
-
-Same `rfd` crate. Find `on_pick_photo` in `main.rs` and replace the stub with:
-
-```rust
-use rfd::FileDialog;
-let picked = FileDialog::new()
-    .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-    .pick_file();
-if let Some(src) = picked {
-    let mut dest = app_dir();
-    dest.push("photos");
-    std::fs::create_dir_all(&dest).ok();
-    dest.push(src.file_name().unwrap());
-    std::fs::copy(&src, &dest).ok();
-    // store dest path in item.thumbnail_path, then reload
-}
-```
 
 ---
 
