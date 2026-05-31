@@ -71,8 +71,24 @@ Two files are written: `data.json` (collections + items) and `settings.json` (th
 
 ## Import / Export
 
-Export writes the full `AppData` JSON to `~/Documents/collector-export.json`.  
-Import reads from the same path and **merges** — existing items (matched by UUID) are not overwritten, so you can safely import old backups without losing edits.
+Both live in **Settings → Data** and use a native file picker.
+
+**Export** writes a portable JSON envelope — `{ app, version, exportedAt, collections: [ … ] }`
+with items nested inside their collection. This is the **same shape the mobile app reads
+and writes**, so a file exported on the desktop opens directly on your phone and vice‑versa.
+
+**Import** auto-detects the file and **merges** by UUID (existing items are never
+overwritten). It accepts:
+
+- the portable envelope above (from desktop **or** mobile),
+- a single exported collection, and
+- the legacy desktop `AppData` shape (older backups still import).
+
+The desktop model is "flat" (separate `collections` + `items` arrays); conversion to and
+from the nested portable shape happens in `src/main.rs` (`appdata_to_portable` /
+`portable_to_appdata`). Collection icons are mapped between emoji (desktop) and symbol
+names (mobile); item photos and field-types are handled best-effort since the two apps
+store them differently.
 
 ---
 

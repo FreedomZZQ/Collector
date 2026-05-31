@@ -64,6 +64,213 @@ fn default_fields() -> Vec<CustomField> {
     ]
 }
 
+// ─── Portable interchange format (shared with the mobile / web apps) ──────────
+//
+// The desktop stores data "flat": collections and items live in separate arrays
+// and an item points at its collection by id. The mobile/web app uses a portable
+// envelope where items are *nested* inside their collection and carry a richer
+// shape (description, tags[], and typed fields). These structs + converters
+// bridge the two so a file exported on one device imports cleanly on the other.
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PortableField {
+    #[serde(default)] label: String,
+    #[serde(default)] value: String,
+    #[serde(default = "default_kind")] kind: String,
+}
+fn default_kind() -> String { "text".into() }
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PortableItem {
+    #[serde(default)] id: String,
+    #[serde(default)] name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] image: Option<String>,
+    #[serde(default)] description: String,
+    #[serde(default)] tags: Vec<String>,
+    #[serde(default)] fields: Vec<PortableField>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PortableCollection {
+    #[serde(default)] id: String,
+    #[serde(default)] name: String,
+    #[serde(default = "default_icon_name")] icon: String,
+    #[serde(default)] items: Vec<PortableItem>,
+}
+fn default_icon_name() -> String { "box".into() }
+
+/// Envelope as written by the mobile/web app: { app, version, exportedAt, collections }.
+#[derive(Debug, Deserialize)]
+struct PortableEnvelopeIn {
+    collections: Vec<PortableCollection>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortableEnvelopeOut {
+    app: String,
+    version: u32,
+    #[serde(rename = "exportedAt")] exported_at: String,
+    collections: Vec<PortableCollection>,
+}
+
+// Icons: the mobile app uses symbol *names*; the desktop uses emoji. Map the
+// common ones both ways (cosmetic only — unknown icons fall back to a box).
+fn icon_name_to_emoji(name: &str) -> String {
+    match name {
+        "headphones" => return "🎧".into(),
+        "pen"        => return "✒".into(),
+        "camera"     => return "📷".into(),
+        "coin"       => return "🪙".into(),
+        "tag"        => return "🏷".into(),
+        "image"      => return "🖼".into(),
+        "box"        => return "📦".into(),
+        _ => {}
+    }
+    // Already an emoji (e.g. a desktop-authored file)? keep it; else default.
+    if name.chars().any(|c| !c.is_ascii()) { name.to_string() } else { "📦".into() }
+}
+fn emoji_to_icon_name(icon: &str) -> &'static str {
+    match icon {
+        "🎧"                   => "headphones",
+        "✒" | "🖊" | "🖋" | "✏" => "pen",
+        "📷" | "📸"             => "camera",
+        "🪙" | "💰" | "💵"      => "coin",
+        "🏷"                   => "tag",
+        "🖼" | "🌄" | "🌅"      => "image",
+        _                       => "box",
+    }
+}
+
+/// Best-effort field-kind for the mobile app, inferred from a field's label.
+fn infer_kind(label: &str) -> String {
+    let l = label.to_lowercase();
+    if l.contains("value") || l.contains("price") || l.contains("cost") || l.contains("worth") { "value" }
+    else if l.contains("condition") || l.contains("grade") { "condition" }
+    else if l.contains("acquired") || l.contains("date") || l.contains("purchased") || l.contains("year") { "date" }
+    else if l.contains("note") || l.contains("comment") { "multiline" }
+    else { "text" }.into()
+}
+
+/// Current UTC date as `YYYY-MM-DD` (avoids pulling in a date crate).
+fn today_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let days = (secs / 86_400) as i64;                       // days since 1970-01-01
+    // Howard Hinnant's civil-from-days algorithm.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// Flatten the mobile/web nested shape into the desktop's `AppData`.
+fn portable_to_appdata(cols: Vec<PortableCollection>) -> AppData {
+    let mut collections = Vec::new();
+    let mut items = Vec::new();
+    for pc in cols {
+        let cid = if pc.id.is_empty() { Uuid::new_v4().to_string() } else { pc.id };
+        collections.push(Collection {
+            id: cid.clone(),
+            name: if pc.name.is_empty() { "Untitled".into() } else { pc.name },
+            icon: icon_name_to_emoji(&pc.icon),
+        });
+        for pi in pc.items {
+            let mut custom_fields: Vec<CustomField> = pi.fields.into_iter().map(|f| CustomField {
+                id: Uuid::new_v4().to_string(), label: f.label, value: f.value,
+            }).collect();
+            // The desktop has no dedicated tags field — fold them into a TAGS field.
+            if !pi.tags.is_empty() {
+                custom_fields.push(CustomField {
+                    id: Uuid::new_v4().to_string(),
+                    label: "TAGS".into(),
+                    value: pi.tags.join(", "),
+                });
+            }
+            items.push(Item {
+                id: if pi.id.is_empty() { Uuid::new_v4().to_string() } else { pi.id },
+                collection_id: cid.clone(),
+                name: pi.name,
+                short_desc: pi.description,
+                thumbnail_path: None,           // photos don't travel between devices
+                custom_fields,
+            });
+        }
+    }
+    AppData { collections, items, templates: Vec::new() }
+}
+
+/// Build the portable (mobile/web) nested shape from the desktop's `AppData`.
+fn appdata_to_portable(d: &AppData) -> Vec<PortableCollection> {
+    d.collections.iter().map(|c| {
+        let items = d.items.iter().filter(|i| i.collection_id == c.id).map(|i| {
+            let mut tags: Vec<String> = Vec::new();
+            let mut fields: Vec<PortableField> = Vec::new();
+            for f in &i.custom_fields {
+                if f.label.trim().eq_ignore_ascii_case("tags") {
+                    tags = f.value.split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect();
+                } else {
+                    fields.push(PortableField {
+                        label: f.label.clone(),
+                        value: f.value.clone(),
+                        kind: infer_kind(&f.label),
+                    });
+                }
+            }
+            PortableItem {
+                id: i.id.clone(),
+                name: i.name.clone(),
+                image: None,
+                description: i.short_desc.clone(),
+                tags,
+                fields,
+            }
+        }).collect();
+        PortableCollection {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            icon: emoji_to_icon_name(&c.icon).into(),
+            items,
+        }
+    }).collect()
+}
+
+/// Parse an import file, accepting any of: the desktop's own `AppData`, a mobile/
+/// web envelope, or a single bare collection. Always returns data in desktop shape.
+fn parse_import_any(contents: &str) -> Option<AppData> {
+    let value: serde_json::Value = serde_json::from_str(contents).ok()?;
+    let obj = value.as_object();
+    let has_top_items   = obj.map(|o| o.get("items").map(|v| v.is_array()).unwrap_or(false)).unwrap_or(false);
+    let has_collections = obj.map(|o| o.get("collections").map(|v| v.is_array()).unwrap_or(false)).unwrap_or(false);
+
+    // Legacy desktop shape is the only one with sibling top-level `items` + `collections`.
+    if has_top_items && has_collections {
+        if let Ok(d) = serde_json::from_str::<AppData>(contents) { return Some(d); }
+    }
+    // Mobile / web envelope: { collections: [ { …, items: [] } ], … }
+    if let Ok(env) = serde_json::from_value::<PortableEnvelopeIn>(value.clone()) {
+        if !env.collections.is_empty() {
+            return Some(portable_to_appdata(env.collections));
+        }
+    }
+    // Single bare collection: { name, icon, items: [] }
+    if let Ok(col) = serde_json::from_value::<PortableCollection>(value) {
+        if !col.name.is_empty() || !col.items.is_empty() {
+            return Some(portable_to_appdata(vec![col]));
+        }
+    }
+    None
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1334,7 +1541,14 @@ fn main() {
                 .save_file()
                 .unwrap_or(default);
             let d = data.borrow();
-            match serde_json::to_string_pretty(&*d) {
+            // Write the portable envelope so the file also imports into the mobile app.
+            let envelope = PortableEnvelopeOut {
+                app: "Collector".into(),
+                version: 1,
+                exported_at: today_iso(),
+                collections: appdata_to_portable(&d),
+            };
+            match serde_json::to_string_pretty(&envelope) {
                 Ok(json) => match std::fs::write(&path, json) {
                     Ok(_)  => ui.set_status_message("".into()),
                     Err(e) => set_status(&ui, format!("Export failed: {e}")),
@@ -1359,8 +1573,8 @@ fn main() {
                 None => { ui.set_status_message("".into()); return; }
             };
             match std::fs::read_to_string(&path) {
-                Ok(contents) => match serde_json::from_str::<AppData>(&contents) {
-                    Ok(imported) => {
+                Ok(contents) => match parse_import_any(&contents) {
+                    Some(imported) => {
                         let mut d = data.borrow_mut();
                         let ex_colls: std::collections::HashSet<_> =
                             d.collections.iter().map(|c| c.id.clone()).collect();
@@ -1381,7 +1595,7 @@ fn main() {
                         clear_detail(&ui);
                         ui.set_status_message("".into());
                     }
-                    Err(e) => set_status(&ui, format!("Parse error: {e}")),
+                    None => set_status(&ui, "Import failed: not a recognised Collector JSON file"),
                 },
                 Err(e) => set_status(&ui, format!("Could not read: {e}")),
             }
@@ -1406,4 +1620,105 @@ fn main() {
     }
 
     ui.run().expect("Event loop failed");
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A mobile/web export, exactly as the iOS app writes it.
+    const MOBILE_JSON: &str = r#"{
+      "app": "Collector",
+      "version": 1,
+      "exportedAt": "2026-05-31",
+      "collections": [
+        {
+          "id": "c1",
+          "name": "Watches",
+          "icon": "tag",
+          "items": [
+            {
+              "id": "i1",
+              "name": "Speedmaster",
+              "description": "Moonwatch",
+              "tags": ["omega", "chrono"],
+              "fields": [
+                { "label": "VALUE / PRICE", "value": "5000", "kind": "value" },
+                { "label": "CONDITION", "value": "Mint", "kind": "condition" }
+              ]
+            }
+          ]
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn imports_mobile_envelope() {
+        let d = parse_import_any(MOBILE_JSON).expect("should parse mobile envelope");
+        assert_eq!(d.collections.len(), 1);
+        assert_eq!(d.collections[0].name, "Watches");
+        assert_eq!(d.collections[0].icon, "🏷");          // symbol name → emoji
+        assert_eq!(d.items.len(), 1);
+        let it = &d.items[0];
+        assert_eq!(it.collection_id, "c1");               // nested → flat link
+        assert_eq!(it.short_desc, "Moonwatch");
+        // Original fields are kept and tags are folded into a TAGS field.
+        assert!(it.custom_fields.iter().any(|f| f.label == "VALUE / PRICE" && f.value == "5000"));
+        assert!(it.custom_fields.iter().any(|f| f.label == "TAGS" && f.value == "omega, chrono"));
+    }
+
+    #[test]
+    fn imports_legacy_desktop_appdata() {
+        let legacy = r#"{
+          "collections": [{ "id": "c1", "name": "Pens", "icon": "✒" }],
+          "items": [{ "id": "i1", "collection_id": "c1", "name": "Pilot",
+                      "short_desc": "", "thumbnail_path": null, "custom_fields": [] }],
+          "templates": []
+        }"#;
+        let d = parse_import_any(legacy).expect("should parse legacy AppData");
+        assert_eq!(d.collections[0].icon, "✒");           // kept verbatim
+        assert_eq!(d.items[0].name, "Pilot");
+    }
+
+    #[test]
+    fn imports_single_bare_collection() {
+        let bare = r#"{ "id": "c9", "name": "Solo", "icon": "camera",
+                        "items": [{ "id": "x", "name": "Leica", "fields": [] }] }"#;
+        let d = parse_import_any(bare).expect("should parse a bare collection");
+        assert_eq!(d.collections.len(), 1);
+        assert_eq!(d.collections[0].icon, "📷");
+        assert_eq!(d.items[0].collection_id, "c9");
+    }
+
+    #[test]
+    fn export_round_trips_back_to_mobile_shape() {
+        // mobile → desktop → mobile should preserve the meaningful content.
+        let d = parse_import_any(MOBILE_JSON).unwrap();
+        let cols = appdata_to_portable(&d);
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].icon, "tag");                  // emoji → symbol name
+        let it = &cols[0].items[0];
+        assert_eq!(it.name, "Speedmaster");
+        assert_eq!(it.description, "Moonwatch");
+        assert_eq!(it.tags, vec!["omega", "chrono"]);     // TAGS field → tags[]
+        // Tags must NOT leak back in as a normal field.
+        assert!(!it.fields.iter().any(|f| f.label.eq_ignore_ascii_case("tags")));
+        // Kind is inferred from the label.
+        let value_field = it.fields.iter().find(|f| f.label == "VALUE / PRICE").unwrap();
+        assert_eq!(value_field.kind, "value");
+    }
+
+    #[test]
+    fn export_serialises_to_camelcase_envelope() {
+        let d = parse_import_any(MOBILE_JSON).unwrap();
+        let envelope = PortableEnvelopeOut {
+            app: "Collector".into(), version: 1, exported_at: today_iso(),
+            collections: appdata_to_portable(&d),
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains("\"exportedAt\""));         // matches the iOS key
+        assert!(json.contains("\"app\":\"Collector\""));
+    }
 }
