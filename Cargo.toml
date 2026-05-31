@@ -1,11 +1,11 @@
 [package]
-name = "collector"
+name = "Collector"
 version = "0.5.11"
 edition = "2021"
 description = "Personal item collection cataloguing app"
 
 [[bin]]
-name = "collector"
+name = "Collector"
 path = "src/main.rs"
 
 [dependencies]
