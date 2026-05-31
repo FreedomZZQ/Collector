@@ -1,0 +1,16 @@
+# Xcode — user-specific state
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+
+# Build output
+build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
