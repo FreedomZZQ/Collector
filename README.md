@@ -64,17 +64,6 @@ Import reads from the same path and **merges** — existing items (matched by UU
 
 ---
 
-## Theme System
-
-`Theme` is a Slint global with `in-out` properties so Rust can update every colour live.  
-`apply_theme(ui, dark, accent_hex)` in `main.rs` sets all tokens in one call.
-
-Adding a new accent preset: add the hex colour to the `accents` array in the `SettingsPanel` component in `main.slint` — the swatch row auto-expands.
-
-Light palette tokens are in `light_palette()` in `main.rs` — easy to customise.
-
----
-
 ## Packaging
 
 ```bash
@@ -86,3 +75,20 @@ cargo bundle --release   # → target/release/bundle/osx/Collector.app
 
 # Windows: the .exe is already standalone
 ```
+
+---
+
+## Running the downloads
+
+- Windows: run collector-windows-x86_64.exe. SmartScreen may warn on first launch (unsigned) — click "More info" then "Run anyway".
+- macOS: on first launch Gatekeeper blocks unsigned apps — right-click the file → Open → confirm (double-clicking won't show the Open option). After that it runs normally.
+- Linux: run the file
+
+---
+
+## Not in the plans
+
+- UI translation.
+    + The UI is easy enough to navigate without much dictionary look-ups. The field labels can be renamed into other languages. The only problem is I've encountered Chinese, Japanese, and Korean rendering, which will be packaged on a per-case basis.
+- Migration to SQLite or other database structure vs JSON.
+    + For a personal collection software (mainly for my own use), JSON works fine. Unless you own a museum with 1000+ articles, or you have... a problem (in which case you need a doctor, not a program)
