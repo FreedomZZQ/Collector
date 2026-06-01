@@ -1048,8 +1048,10 @@ component FieldEditorModal {
     callback close();
     callback text-edited(string);
 
-    property <length> mw: 460px;
-    property <length> mh: 360px;
+    // Default to a large share of the window; user can still drag-resize.
+    // Rounded to whole pixels so text isn't rendered off the pixel grid (blurry).
+    property <length> mw: round(clamp(root.width * 70%, 420px, 1100px) / 1px) * 1px;
+    property <length> mh: round(clamp(root.height * 75%, 320px, 820px) / 1px) * 1px;
 
     init => { fe.focus(); }
 
@@ -1059,8 +1061,8 @@ component FieldEditorModal {
     }
 
     panel := Rectangle {
-        x: (parent.width  - root.mw) / 2;
-        y: (parent.height - root.mh) / 2;
+        x: round((parent.width  - root.mw) / 2 / 1px) * 1px;
+        y: round((parent.height - root.mh) / 2 / 1px) * 1px;
         width: root.mw; height: root.mh;
         border-radius: 12px; background: Theme.bg-panel;
         border-width: 1px; border-color: Theme.border;
@@ -1094,7 +1096,7 @@ component FieldEditorModal {
 
                 // Moving wrapper holds the TextInput; we shift the wrapper, not the input
                 Rectangle {
-                    x: 8px; y: 4px - root2.scroll-y;
+                    x: 8px; y: round((4px - root2.scroll-y) / 1px) * 1px;
                     width: parent.width - 22px;
                     height: max(root2.content-h, root2.view-h);
                     fe := TextInput {
@@ -1179,8 +1181,8 @@ component FieldEditorModal {
                 }
             }
             moved => {
-                root.mw = clamp(self.start-w + (self.mouse-x - self.pressed-x) * 2, 320px, 900px);
-                root.mh = clamp(self.start-h + (self.mouse-y - self.pressed-y) * 2, 240px, 700px);
+                root.mw = clamp(self.start-w + (self.mouse-x - self.pressed-x) * 2, 320px, 1100px);
+                root.mh = clamp(self.start-h + (self.mouse-y - self.pressed-y) * 2, 240px, 820px);
             }
             Rectangle {
                 width: 100%; height: 100%;
