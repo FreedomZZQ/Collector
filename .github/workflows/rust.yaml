@@ -104,12 +104,14 @@ jobs:
           set -euo pipefail
           APP="Collector.app"
           mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+          cp "assets/icons/Collector.icns" "${APP}/Contents/Resources/Collector.icns"
 
           cat > "${APP}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
+            <key>CFBundleIconFile</key>         <string>Collector</string>
             <key>CFBundleName</key>             <string>Collector</string>
             <key>CFBundleDisplayName</key>      <string>Collector</string>
             <key>CFBundleExecutable</key>       <string>${{ matrix.artifact }}</string>
