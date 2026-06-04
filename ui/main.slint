@@ -734,7 +734,7 @@ component PhotoLightbox {
     // The vector from area-center to cursor, minus current pan, is the image point
     // under the cursor; scaling must keep it fixed, so pan shifts by that vector * (ratio-1).
     function do-zoom(zoom-in: bool, mx: length, my: length) {
-        root.new-zoom = clamp(root.zoom * (zoom-in ? 1.15 : 0.87), 1.0, 5.0);
+        root.new-zoom = clamp(root.zoom * (zoom-in ? 1.85 : 0.93), 1.0, 10.0);
         root.pan-x = root.pan-x - ((mx - root.base-w / 2) - root.pan-x) * (root.new-zoom / root.zoom - 1);
         root.pan-y = root.pan-y - ((my - root.base-h / 2) - root.pan-y) * (root.new-zoom / root.zoom - 1);
         root.zoom = root.new-zoom;
