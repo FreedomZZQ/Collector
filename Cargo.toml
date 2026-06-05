@@ -1,11 +1,11 @@
 [package]
-name = "Collector"
-version = "1.0.0"
+name = "collectors-notebook"
+version = "1.0.1"
 edition = "2021"
 description = "Personal item collection cataloguing app"
 
 [[bin]]
-name = "Collector"
+name = "collectors-notebook"
 path = "src/main.rs"
 
 [dependencies]
@@ -26,7 +26,3 @@ winresource = "0.1"
 
 [profile.release]
 strip = true
-opt-level = "z"
-lto = true
-panic = "abort"
-codegen-units = 1

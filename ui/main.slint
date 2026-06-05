@@ -1,4 +1,4 @@
-// ui/main.slint — Collector v5
+// ui/main.slint — Collector's Notebook v1.0.1
 // Unicode chrome (×, ✓, ←, ↑, ↓, →) + Segoe UI Emoji for emoji-displaying elements
 
 import { ScrollView } from "std-widgets.slint";
@@ -675,7 +675,7 @@ component SettingsPanel {
                         VerticalLayout {
                             alignment: center;
                             Text { text: "Open data folder"; font-size: Theme.ui-font-size - 2px; color: Theme.text-primary; }
-                            Text { text: "AppData/Local/collector"; font-size: Theme.ui-font-size - 4px; color: Theme.text-muted; }
+                            Text { text: "AppData/Local/Collectors-Notebook"; font-size: Theme.ui-font-size - 4px; color: Theme.text-muted; }
                         }
                     }
                 }
@@ -1333,7 +1333,7 @@ component SortMenu inherits Rectangle {
 // ─── Root Window ──────────────────────────────────────────────────────────────
 
 export component AppWindow inherits Window {
-    title: "Collector";
+    title: "Collector's Notebook";
     icon: root.window-icon;
     in property <image> window-icon;
     min-width: 820px; min-height: 540px;

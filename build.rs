@@ -5,7 +5,7 @@ fn main() {
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
-        res.set_icon("assets/icons/Collector.ico");
+        res.set_icon("assets/icons/Collectors-Notebook.ico");
         res.compile().unwrap();
     }
 }
