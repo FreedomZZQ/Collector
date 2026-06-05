@@ -7,7 +7,11 @@
 </p>
 <p align="center"></p>
 
-A lightweight, native desktop app for cataloguing personal collections. I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8) to built it in **Rust + Slint**. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo. The traveler's notebook is basically a piece of leather as the cover, with a ribbon/rubber band looped along the spine (fold) for holding different inserts for different needs. Like the traveler's notebooks, Collector's Notebook is also versatile, in that you can catalogue not just your various collections, but also, I don't know, food in pantry or fridge, shops you've been into, cities traveled to, festivals, contacts, pet vet visits, books, music, gas refill dates, enemies, teeth for the tooth fairy, boyfriend/girlfriends you went through, etc.
+A lightweight, native desktop app for cataloguing personal collections.
+
+I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8) to built it in **Rust + Slint**. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo.
+
+The traveler's notebook is basically a piece of leather wrapped around papers. The papers (called "inserts") are held by a ribbon or rubber band that loops along the spine (fold) of the leather. The inserts can come in different styles, such as lined, dotted, grids, calendars, or blank, to suit different needs. Like the traveler's notebooks, Collector's Notebook is also versatile, in that you can catalogue not just your various collections, but also, I don't know, food in pantry or fridge, shops you've been into, cities traveled to, festivals, contacts, pet vet visits, books, music, gas refill dates, enemies, teeth for the tooth fairy, boyfriend/girlfriends you went through, etc.
 
 Just don't use it as a diary. It has a 200 word limit for each field.
 
