@@ -64,7 +64,7 @@ fun CollectionsHomeScreen(nav: NavHostController) {
                     Column(Modifier.weight(1f)) {
                         MonoLabel("Local library")
                         Column(Modifier.padding(top = 6.dp)) {
-                            Text("Collector", style = serif(33f, FontWeight.SemiBold, tracking = -0.3f), color = p.text)
+                            Text("Collector's Notebook", style = serif(33f, FontWeight.SemiBold, tracking = -0.3f), color = p.text)
                             Text(
                                 "${store.collections.size} collections · ${store.totalItems} pieces",
                                 style = mono(12.5f),

@@ -177,7 +177,7 @@ fun SettingsScreen(nav: NavHostController) {
         Section("About") {
             Card {
                 SettingRow(last = false) {
-                    Text("Collector", style = sans(16f), color = p.text)
+                    Text("Collector's Notebook", style = sans(16f), color = p.text)
                     Box(Modifier.weight(1f))
                     Text("Android · 1.0", style = mono(13f), color = p.faint)
                 }

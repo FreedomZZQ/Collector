@@ -132,7 +132,7 @@ struct SettingsTab: View {
                 section("About") {
                     card {
                         row(last: false) {
-                            Text("Collector").font(.ui(16)).foregroundColor(p.text)
+                            Text("Collector's Notebook").font(.ui(16)).foregroundColor(p.text)
                             Spacer()
                             Text("iOS · 1.0").font(.mono(13)).foregroundColor(p.faint)
                         }

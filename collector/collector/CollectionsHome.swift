@@ -19,7 +19,7 @@ struct CollectionsHome: View {
             VStack(alignment: .leading, spacing: 0) {
                 LargeHeader(
                     overline: "Local library",
-                    title: "Collector",
+                    title: "Collector's Notebook",
                     sub: "\(store.collections.count) collections · \(store.totalItems) pieces"
                 ) {
                     HStack(spacing: 4) {
