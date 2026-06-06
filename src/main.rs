@@ -1,4 +1,4 @@
-// src/main.rs — Collector v5
+// src/main.rs — Collector's Notebook v1.0.1
 #![windows_subsystem = "windows"]
 
 slint::include_modules!();
@@ -380,7 +380,7 @@ fn apply_theme(ui: &AppWindow, dark: bool, accent_hex: &str) {
 
 fn app_dir() -> PathBuf {
     let mut p = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    p.push("collector");
+    p.push("Collectors-Notebook");
     std::fs::create_dir_all(&p).ok();
     p
 }
@@ -731,6 +731,20 @@ fn main() {
     let mut app_data = load_data();
     let settings  = load_settings();
     let ui        = AppWindow::new().expect("Failed to create window");
+
+    // Set the window/title-bar icon at runtime (covers Linux/macOS, and the
+    // title bar on Windows 11). On Windows 10 the title-bar caption icon may not
+    // pick this up — that's an OS-specific quirk; the embedded .exe icon still
+    // supplies the taskbar/Explorer icon on all Windows versions.
+    {
+        let icon_bytes = include_bytes!("../assets/icons/Collectors-Notebook.png");
+        if let Ok(img) = image::load_from_memory(icon_bytes) {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rgba, w, h);
+            ui.set_window_icon(slint::Image::from_rgba8(buf));
+        }
+    }
 
     // Initialize sort modes from settings before building any models
     set_item_sort(settings.item_sort);
@@ -1891,10 +1905,10 @@ fn main() {
             let default = dirs::document_dir()
                 .or_else(|| dirs::home_dir())
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("collector-export.json");
+                .join("Collectors-Notebook-export.json");
             let path = rfd::FileDialog::new()
                 .set_title("Export collection data")
-                .set_file_name("collector-export.json")
+                .set_file_name("Collectors-Notebook-export.json")
                 .add_filter("JSON", &["json"])
                 .save_file()
                 .unwrap_or(default);

@@ -27,20 +27,20 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: Collector.exe
-            asset: Collector-windows-x86_64.exe
+            artifact: collectors-notebook.exe
+            asset: Collectors-Notebook-windows-x86_64.exe
           - os: macos-latest
             target: aarch64-apple-darwin       # Apple Silicon (M1+)
-            artifact: Collector
-            asset: Collector-macos-arm64.dmg
+            artifact: collectors-notebook
+            asset: Collectors-Notebook-macos-arm64.dmg
           - os: macos-15-intel
             target: x86_64-apple-darwin         # Intel Macs
-            artifact: Collector
-            asset: Collector-macos-x86_64.dmg
+            artifact: collectors-notebook
+            asset: Collectors-Notebook-macos-x86_64.dmg
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: Collector
-            asset: Collector-linux-x86_64
+            artifact: collectors-notebook
+            asset: Collectors-Notebook-linux-x86_64
 
     steps:
       - name: Checkout
@@ -102,18 +102,20 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          APP="Collector.app"
+          APP="Collectors-Notebook.app"
           mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+          cp "assets/icons/Collectors-Notebook.icns" "${APP}/Contents/Resources/Collectors-Notebook.icns"
 
           cat > "${APP}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>CFBundleName</key>             <string>Collector</string>
-            <key>CFBundleDisplayName</key>      <string>Collector</string>
+            <key>CFBundleIconFile</key>         <string>Collectors-Notebook</string>
+            <key>CFBundleName</key>             <string>Collector's Notebook</string>
+            <key>CFBundleDisplayName</key>      <string>Collector's Notebook</string>
             <key>CFBundleExecutable</key>       <string>${{ matrix.artifact }}</string>
-            <key>CFBundleIdentifier</key>       <string>com.example.Collector</string>
+            <key>CFBundleIdentifier</key>       <string>com.example.collectors-notebook</string>
             <key>CFBundlePackageType</key>      <string>APPL</string>
             <key>LSMinimumSystemVersion</key>   <string>10.13</string>
             <key>NSHighResolutionCapable</key>  <true/>
@@ -132,7 +134,7 @@ jobs:
           STAGE="$(mktemp -d)"
           cp -R "${APP}" "${STAGE}/"
           ln -s /Applications "${STAGE}/Applications"
-          hdiutil create -volname "Collector" \
+          hdiutil create -volname "Collector's Notebook" \
             -srcfolder "${STAGE}" -ov -format UDZO \
             "dist/${{ matrix.asset }}"
 
