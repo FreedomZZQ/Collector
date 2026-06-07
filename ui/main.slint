@@ -1444,6 +1444,9 @@ export component AppWindow inherits Window {
     callback delete-custom-field(string);
     callback custom-field-label-changed(string, string);
     callback custom-field-value-changed(string, string);
+    // Modal "Enlarge" save: persists AND refreshes the inline fields (safe because
+    // the modal has closed, so there's no inline TextInput to lose focus).
+    callback custom-field-value-set(string, string);
     callback save-template-named(string);
     callback apply-template(string);
     callback delete-template(string);
@@ -2424,7 +2427,7 @@ export component AppWindow inherits Window {
                 root.detail-desc = txt;
                 root.field-changed("desc", txt);
             } else {
-                root.custom-field-value-changed(root.field-editor-purpose, txt);
+                root.custom-field-value-set(root.field-editor-purpose, txt);
             }
             fs.focus();
         }

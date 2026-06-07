@@ -1228,6 +1228,28 @@ fn main() {
     {
         let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
         ui.on_custom_field_value_changed(move |field_id, new_value| {
+            let _ui = ui_w.unwrap();
+            let item_id = sel_item.borrow().clone().unwrap_or_default();
+            if item_id.is_empty() { return; }
+            let mut d = data.borrow_mut();
+            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
+                if let Some(field) = item.custom_fields.iter_mut().find(|f| f.id == field_id.as_str()) {
+                    field.value = truncate_words(&new_value, 200);
+                }
+                save_data(&d);
+                // NOTE: do NOT rebuild detail-fields here — this fires on every
+                // inline keystroke, and rebuilding the model would destroy the
+                // TextInput being typed in (focus loss). The inline box already
+                // shows the typed text. The modal save uses a separate callback
+                // (custom-field-value-set) that does refresh.
+            }
+        });
+    }
+
+    // ── custom-field-value-set (modal "Enlarge" save: persist + refresh) ───────
+    {
+        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
+        ui.on_custom_field_value_set(move |field_id, new_value| {
             let ui = ui_w.unwrap();
             let item_id = sel_item.borrow().clone().unwrap_or_default();
             if item_id.is_empty() { return; }
@@ -1237,7 +1259,6 @@ fn main() {
                     field.value = truncate_words(&new_value, 200);
                 }
                 save_data(&d);
-                // Refresh the displayed fields so inline boxes show the new value
                 if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
                     ui.set_detail_fields(to_slint_fields(item));
                 }
