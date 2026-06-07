@@ -25,4 +25,8 @@ slint-build = "1.16.1"
 winresource = "0.1"
 
 [profile.release]
-strip = true
+opt-level = "z"     # optimize for size
+lto = true          # link-time optimization
+strip = true        # strip debug symbols
+panic = "abort"     # smaller panic handling
+codegen-units = 1   # better optimization (slower compile)
