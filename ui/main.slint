@@ -1334,8 +1334,11 @@ component SortMenu inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "Collector's Notebook";
-    icon: root.window-icon;
-    in property <image> window-icon;
+    // Embedded at compile time so it has a valid image cache key. A runtime
+    // Image::from_rgba8 has cache_key == Invalid, which Slint's winit backend
+    // treats as "unchanged" and never forwards to the OS window — so the title
+    // bar icon would stay blank. @image-url avoids that.
+    icon: @image-url("../assets/icons/Collectors-Notebook.png");
     min-width: 820px; min-height: 540px;
     preferred-width: 1200px; preferred-height: 760px;
     background: Theme.bg-base;

@@ -525,19 +525,9 @@ fn main() {
     let settings  = load_settings();
     let ui        = AppWindow::new().expect("Failed to create window");
 
-    // Set the window/title-bar icon at runtime (covers Linux/macOS, and the
-    // title bar on Windows 11). On Windows 10 the title-bar caption icon may not
-    // pick this up — that's an OS-specific quirk; the embedded .exe icon still
-    // supplies the taskbar/Explorer icon on all Windows versions.
-    {
-        let icon_bytes = include_bytes!("../assets/icons/Collectors-Notebook.png");
-        if let Ok(img) = image::load_from_memory(icon_bytes) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rgba, w, h);
-            ui.set_window_icon(slint::Image::from_rgba8(buf));
-        }
-    }
+    // The window/title-bar icon is set in main.slint via @image-url so it has a
+    // valid image cache key (a runtime Image::from_rgba8 would be ignored by
+    // Slint's winit backend). The .exe/taskbar icon is embedded via build.rs.
 
     // Initialize sort modes from settings before building any models
     set_item_sort(settings.item_sort);
