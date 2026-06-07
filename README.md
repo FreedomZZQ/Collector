@@ -17,16 +17,26 @@ Just don't use it as a diary. It has a 200 word limit for each field.
 
 ---
 
+<p align="center">
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/19c67351-b4b1-4686-a036-b05e7cef0fda" />
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/62a45c2c-0fa2-41e5-9d58-2af648794ae8" />
+    <br>
+    <sub>Click to enlarge</sub>
+</p>
+<p align="center"></p>
+
+
 ## Features
 
 - Resizeable three-panel layout
+- Light and dark mode, and font size between 11-22pt
 - Customizable and renamable fields; also save all your fields as templates with names of your choice
 - Right click context menus for quick rename/duplication/deletion
 - Edit/View mode toggle, as well as inline edit panel when needed
 - Zoom images in/out 10x, and the ability to attach multiple photos to an item entry
 - Local JSON storage that you can migrate between machines with export/import
 - Simplified Chinese, Japanese, and Korean support for input texts (no UI translation)
-- Small size! Less than 30 MB depends on how you build it, and can go down to ~16 MB on Windows
+- Small size! Less than 30 MB depends on how you build it, and can go down to ~18 MB on Windows
 
 ---
 
