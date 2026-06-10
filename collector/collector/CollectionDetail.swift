@@ -10,24 +10,34 @@ import SwiftUI
 // MARK: - Sorting
 
 enum SortKey: String, CaseIterable, Identifiable {
-    case name, valueDesc, valueAsc, recent
+    case name, nameDesc, valueDesc, valueAsc, recent
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .name: return "Name (A–Z)"
+        case .nameDesc: return "Name (Z–A)"
         case .valueDesc: return "Value (high → low)"
         case .valueAsc: return "Value (low → high)"
         case .recent: return "Recently acquired"
         }
     }
-    var short: String { String(label.split(separator: " ").first ?? "") }
+    var short: String {
+        switch self {
+        case .name: return "Name A–Z"
+        case .nameDesc: return "Name Z–A"
+        case .valueDesc, .valueAsc: return "Value"
+        case .recent: return "Recently"
+        }
+    }
 }
 
 func sortItems(_ items: [Item], _ sort: SortKey) -> [Item] {
     switch sort {
     case .name:
         return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    case .nameDesc:
+        return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
     case .valueDesc:
         return items.sorted { parseValue($0) > parseValue($1) }
     case .valueAsc:
@@ -304,7 +314,14 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 13) {
-            Thumb(icon: icon, size: 50)
+            if let cover = item.images.first {
+                ItemPhoto(name: cover, maxPixel: 300)
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(p.line, lineWidth: 0.5))
+            } else {
+                Thumb(icon: icon, size: 50)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name).font(.serif(17)).foregroundColor(p.text).lineLimit(1)
                 HStack(spacing: 7) {
@@ -343,7 +360,14 @@ struct ItemCard: View {
                 Rectangle()
                     .fill(p.surface2)
                     .aspectRatio(1, contentMode: .fit)
-                    .overlay(Icon(name: icon, size: 42).foregroundColor(p.faint))
+                    .overlay {
+                        if let cover = item.images.first {
+                            ItemPhoto(name: cover, maxPixel: 600)
+                        } else {
+                            Icon(name: icon, size: 42).foregroundColor(p.faint)
+                        }
+                    }
+                    .clipped()
                 if let cond = fieldByKind(item, .condition), !cond.value.isEmpty {
                     Circle().fill(conditionColor(cond.value))
                         .frame(width: 9, height: 9)

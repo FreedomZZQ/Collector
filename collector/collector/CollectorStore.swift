@@ -32,6 +32,9 @@ final class CollectorStore: ObservableObject {
 
     init() {
         load()
+        // Sweep photo files orphaned by a previous run (e.g. the app was killed
+        // while the item editor had unsaved photos).
+        pruneImages()
     }
 
     // MARK: - JSON config
@@ -103,6 +106,7 @@ final class CollectorStore: ObservableObject {
             collections[ci].items.append(item)
         }
         save()
+        pruneImages() // drops files for photos removed during the edit
     }
 
     /// Soft-delete: move the item into the recycle bin.
@@ -152,16 +156,19 @@ final class CollectorStore: ObservableObject {
     func purgeItem(_ id: String) {
         trash.items.removeAll { $0.id == id }
         save()
+        pruneImages()
     }
 
     func purgeCollection(_ id: String) {
         trash.collections.removeAll { $0.id == id }
         save()
+        pruneImages()
     }
 
     func emptyTrash() {
         trash = Trash()
         save()
+        pruneImages()
     }
 
     // MARK: - Template mutations
@@ -218,6 +225,7 @@ final class CollectorStore: ObservableObject {
             trash.collections.append(contentsOf: incomingTrash.collections.filter { !exColIDs.contains($0.id) })
         }
         save()
+        pruneImages() // a replace-import can drop the last reference to a photo
     }
 
     /// Parse raw JSON into collections + trash. Accepts a full envelope
@@ -252,5 +260,27 @@ final class CollectorStore: ObservableObject {
         let file = LibraryFile(collections: collections, templates: templates, trash: trash)
         guard let data = try? Self.makeEncoder().encode(file) else { return }
         try? data.write(to: fileURL, options: .atomic)
+    }
+
+    // MARK: - Photo files
+
+    /// Photo file names referenced by any live or trashed item.
+    private var referencedImages: Set<String> {
+        var refs = Set<String>()
+        for c in collections { for it in c.items { refs.formUnion(it.images) } }
+        for t in trash.items { refs.formUnion(t.item.images) }
+        for t in trash.collections { for it in t.collection.items { refs.formUnion(it.images) } }
+        return refs
+    }
+
+    /// Delete stored photo files nothing references any more. Safe to call at
+    /// any mutation point: while the item editor is open (the only place new
+    /// photo files are created before being referenced) no store mutation can
+    /// happen, because it is presented full-screen.
+    private func pruneImages() {
+        let refs = referencedImages
+        Task.detached(priority: .utility) {
+            ImageStore.prune(referenced: refs)
+        }
     }
 }

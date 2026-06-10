@@ -19,6 +19,8 @@ struct ItemDetail: View {
 
     @State private var showMenu = false
     @State private var editing = false
+    @State private var showViewer = false
+    @State private var viewerStart = 0
     // Menu actions run after the sheet finishes dismissing (avoids a tear-down race).
     @State private var pendingAction: ItemMenuAction = .none
 
@@ -53,18 +55,7 @@ struct ItemDetail: View {
             topBar(col: col, item: item)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    HeroStripes()
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(4.0 / 3.0, contentMode: .fit)
-                        .overlay(
-                            VStack(spacing: 8) {
-                                Icon(name: col.icon, size: 54)
-                                Text("product photo").font(.mono(10.5)).tracking(0.8).textCase(.uppercase)
-                            }
-                            .foregroundColor(p.faint)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.r, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.r, style: .continuous).strokeBorder(p.line, lineWidth: 0.5))
+                    hero(col: col, item: item)
                         .padding(.horizontal, 20)
                         .padding(.top, 4)
 
@@ -115,6 +106,36 @@ struct ItemDetail: View {
             }
         }
         .sheet(isPresented: $showMenu, onDismiss: runPendingAction) { menuSheet(item) }
+        .fullScreenCover(isPresented: $showViewer) {
+            PhotoViewer(images: item.images, startAt: viewerStart) { showViewer = false }
+        }
+    }
+
+    /// Photo pager when the item has photos, the striped placeholder otherwise.
+    @ViewBuilder
+    private func hero(col: ItemCollection, item: Item) -> some View {
+        Group {
+            if item.images.isEmpty {
+                HeroStripes()
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                    .overlay(
+                        VStack(spacing: 8) {
+                            Icon(name: col.icon, size: 54)
+                            Text("product photo").font(.mono(10.5)).tracking(0.8).textCase(.uppercase)
+                        }
+                        .foregroundColor(p.faint)
+                    )
+            } else {
+                PhotoPager(images: item.images) { index in
+                    viewerStart = index
+                    showViewer = true
+                }
+                .aspectRatio(4.0 / 3.0, contentMode: .fit)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Radius.r, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.r, style: .continuous).strokeBorder(p.line, lineWidth: 0.5))
     }
 
     private func runPendingAction() {

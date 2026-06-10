@@ -2,10 +2,11 @@
 //  ItemEditor.swift
 //  collector
 //
-//  New / edit item: name, description, tags, dynamic fields, templates.
+//  New / edit item: photos, name, description, tags, dynamic fields, templates.
 //
 
 import SwiftUI
+import PhotosUI
 
 struct ItemEditor: View {
     let collectionID: String
@@ -20,6 +21,9 @@ struct ItemEditor: View {
     @State private var showAddField = false
     @State private var showLoadTemplate = false
     @State private var showSaveTemplate = false
+    @State private var pickerItems: [PhotosPickerItem] = []
+    /// Photo files written during this editing session; deleted again on Cancel.
+    @State private var sessionPhotos: [String] = []
 
     init(collectionID: String, item: Item?) {
         self.collectionID = collectionID
@@ -34,7 +38,7 @@ struct ItemEditor: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    photoPlaceholder
+                    photosSection
                     labeled("Name", top: 20) {
                         PlainTextField(placeholder: "e.g. Leica M6", text: $draft.name)
                     }
@@ -70,7 +74,12 @@ struct ItemEditor: View {
 
     private var header: some View {
         HStack {
-            Button { dismiss() } label: {
+            Button {
+                // Drop photo files added during this session — the draft that
+                // references them is being discarded.
+                for name in sessionPhotos { ImageStore.delete(name) }
+                dismiss()
+            } label: {
                 Text("Cancel").font(.ui(16)).foregroundColor(p.muted)
             }
             .buttonStyle(.plain)
@@ -96,25 +105,102 @@ struct ItemEditor: View {
         .overlay(Rectangle().fill(p.line).frame(height: 0.5), alignment: .bottom)
     }
 
-    // MARK: - Photo (placeholder, non-functional by design)
+    // MARK: - Photos
 
-    private var photoPlaceholder: some View {
-        HeroStripes()
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 3.0, contentMode: .fit)
-            .overlay(
-                VStack(spacing: 8) {
-                    Icon(name: "image", size: 32)
-                    Text("Add photo").font(.ui(13, .semibold))
+    @ViewBuilder
+    private var photosSection: some View {
+        Group {
+            if draft.images.isEmpty {
+                PhotosPicker(selection: $pickerItems, maxSelectionCount: 10, matching: .images) {
+                    HeroStripes()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                        .overlay(
+                            VStack(spacing: 8) {
+                                Icon(name: "image", size: 32)
+                                Text("Add photos").font(.ui(13, .semibold))
+                            }
+                            .foregroundColor(p.faint)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.r, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.r, style: .continuous)
+                                .strokeBorder(p.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [5]))
+                        )
                 }
-                .foregroundColor(p.faint)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Radius.r, style: .continuous))
+                .buttonStyle(.plain)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(draft.images, id: \.self) { name in
+                            photoTile(name)
+                        }
+                        PhotosPicker(selection: $pickerItems, maxSelectionCount: 10, matching: .images) {
+                            VStack(spacing: 6) {
+                                Icon(name: "plus", size: 20, weight: .semibold)
+                                Text("Add").font(.ui(12, .semibold))
+                            }
+                            .foregroundColor(p.accent)
+                            .frame(width: 96, height: 96)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                                    .strokeBorder(p.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [5]))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(.top, 18)
+        .onChange(of: pickerItems) { importPicked($0) }
+    }
+
+    private func photoTile(_ name: String) -> some View {
+        ItemPhoto(name: name, maxPixel: 400)
+            .frame(width: 96, height: 96)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.r, style: .continuous)
-                    .strokeBorder(p.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [5]))
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(p.line, lineWidth: 0.5)
             )
-            .padding(.top, 18)
+            .overlay(alignment: .topTrailing) {
+                Button { removePhoto(name) } label: {
+                    Icon(name: "close", size: 12, weight: .bold)
+                        .foregroundColor(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.black.opacity(0.55)))
+                }
+                .buttonStyle(.plain)
+                .padding(4)
+            }
+    }
+
+    /// Re-encode the picked photos into the image store and reference them.
+    private func importPicked(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        pickerItems = []
+        Task {
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                guard let name = await Task.detached(priority: .userInitiated, operation: {
+                    ImageStore.save(data)
+                }).value else { continue }
+                draft.images.append(name)
+                sessionPhotos.append(name)
+            }
+        }
+    }
+
+    private func removePhoto(_ name: String) {
+        draft.images.removeAll { $0 == name }
+        // A photo added this session has no other owner — delete the file now.
+        // Pre-existing photos stay on disk until Save, in case the user cancels.
+        if let i = sessionPhotos.firstIndex(of: name) {
+            sessionPhotos.remove(at: i)
+            ImageStore.delete(name)
+        }
     }
 
     // MARK: - Tags
@@ -248,11 +334,16 @@ struct ItemEditor: View {
     }
 
     private func applyTemplate(_ tpl: Template) {
-        let existingLabels = Set(draft.fields.map { $0.label.lowercased() })
-        let toAdd = tpl.fields
-            .filter { !existingLabels.contains($0.label.lowercased()) }
-            .map { Field(label: $0.label, value: "", kind: $0.kind) }
-        draft.fields.append(contentsOf: toAdd)
+        // Replace the whole field list with the template's, carrying over values
+        // whose labels match (case-insensitively) so typed data survives the swap.
+        var existingValues: [String: String] = [:]
+        for f in draft.fields where !f.value.isEmpty {
+            let key = f.label.lowercased()
+            if existingValues[key] == nil { existingValues[key] = f.value }
+        }
+        draft.fields = tpl.fields.map {
+            Field(label: $0.label, value: existingValues[$0.label.lowercased()] ?? "", kind: $0.kind)
+        }
         showLoadTemplate = false
     }
 
@@ -321,7 +412,7 @@ private struct LoadTemplateSheet: View {
     var body: some View {
         SheetScaffold(title: "Load template", onClose: onClose) {
             VStack(alignment: .leading, spacing: 9) {
-                Text("Adds the template's fields to this item (existing fields are kept).")
+                Text("Replaces this item's fields with the template's. Values of fields with matching names are kept.")
                     .font(.ui(13.5)).foregroundColor(p.muted).lineSpacing(2)
                     .padding(.bottom, 4)
 

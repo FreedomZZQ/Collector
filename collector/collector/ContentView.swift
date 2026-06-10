@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Navigation values
 
@@ -76,6 +77,22 @@ private struct SettingsTabContainer: View {
         NavigationStack {
             SettingsTab()
         }
+    }
+}
+
+// MARK: - Edge-swipe back
+
+// Every screen hides the system navigation bar and draws its own top bar, which
+// makes UIKit disable the interactive pop gesture. Re-attach it with a delegate
+// that allows the edge swipe whenever there is somewhere to pop back to.
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        viewControllers.count > 1 && transitionCoordinator == nil
     }
 }
 

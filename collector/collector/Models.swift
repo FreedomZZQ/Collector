@@ -69,37 +69,51 @@ struct Field: Codable, Identifiable, Hashable {
 struct Item: Codable, Identifiable, Hashable {
     var id: String
     var name: String
-    var image: String?
+    /// Photo file names inside the app's image store; `images.first` is the cover.
+    var images: [String]
     var description: String
     var tags: [String]
     var fields: [Field]
 
     init(id: String = UUID().uuidString,
          name: String = "",
-         image: String? = nil,
+         images: [String] = [],
          description: String = "",
          tags: [String] = [],
          fields: [Field] = []) {
         self.id = id
         self.name = name
-        self.image = image
+        self.images = images
         self.description = description
         self.tags = tags
         self.fields = fields
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, image, description, tags, fields }
+    private enum CodingKeys: String, CodingKey { case id, name, image, images, description, tags, fields }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        image = try c.decodeIfPresent(String.self, forKey: .image)
+        // `images` is this app's multi-photo shape; older files carry a single `image`.
+        let single = try c.decodeIfPresent(String.self, forKey: .image)
+        images = try c.decodeIfPresent([String].self, forKey: .images) ?? single.map { [$0] } ?? []
         description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         fields = try c.decodeIfPresent([Field].self, forKey: .fields) ?? []
     }
-    // encode(to:) is synthesised from CodingKeys → emits {id,name,image,description,tags,fields}
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        // Keep the single-`image` key so the desktop/web apps still parse the file.
+        try c.encodeIfPresent(images.first, forKey: .image)
+        if !images.isEmpty { try c.encode(images, forKey: .images) }
+        try c.encode(description, forKey: .description)
+        try c.encode(tags, forKey: .tags)
+        try c.encode(fields, forKey: .fields)
+    }
 }
 
 extension Item {
