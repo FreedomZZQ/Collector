@@ -18,8 +18,8 @@ Just don't use it as a diary. It has a 200 word limit for each field.
 ---
 
 <p align="center">
-    <img height="512" alt="image" src="https://github.com/user-attachments/assets/19c67351-b4b1-4686-a036-b05e7cef0fda" />
-    <img height="512" alt="image" src="https://github.com/user-attachments/assets/62a45c2c-0fa2-41e5-9d58-2af648794ae8" />
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/adafb259-9fce-448c-abd3-4f4ac9bf44d5" />
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/8532fef2-c12f-4f49-8d5e-34f4bffd22b7" />
     <br>
     <sub>Click to enlarge</sub>
 </p>
@@ -38,7 +38,7 @@ Just don't use it as a diary. It has a 200 word limit for each field.
 - Simplified Chinese, Japanese, and Korean support for input texts (no UI translation)
 - Small size! Less than 30 MB depends on how you build it, and can go down to ~18 MB on Windows
 
-## New in v2.0
+## New in v2.0!!!
 
 v2.0 is a full migration from Slint UI to Iced UI. This should bring improvements such as:
 - New architecture
