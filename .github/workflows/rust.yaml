@@ -63,7 +63,7 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-cargo-
 
-      # Linux needs system libraries for the GUI (Slint/winit), font rendering,
+      # Linux needs system libraries for the GUI (winit), font rendering,
       # and the rfd native file dialog (GTK).
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
