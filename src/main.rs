@@ -1,1792 +1,547 @@
-// src/main.rs — Collector's Notebook v1.0.1
-#![windows_subsystem = "windows"]
+// src/main.rs — Collector's Notebook, iced 0.14 port.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-slint::include_modules!();
-use slint::Model;
+mod model;
+mod theme;
+mod image_util;
 
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::cell::RefCell;
-use uuid::Uuid;
+use iced::widget::{
+    button, column, container, image as image_widget, mouse_area, pane_grid, pick_list, row,
+    scrollable, stack, text, text_editor, text_input,
+};
+use iced::widget::text_editor::{Action as EdAction, Content as EdContent};
+use iced::{Color, Element, Fill, Length, Shrink, Task, Theme as IcedTheme};
 
-// ─── Data Model ───────────────────────────────────────────────────────────────
+use model::*;
+use theme::{build_palette, color_to_hex, hex, Palette};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Collection {
-    id: String,
-    name: String,
-    icon: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct Item {
-    id: String,
-    collection_id: String,
-    name: String,
-    short_desc: String,
-    // All photos for this item; photos[0] is the primary (card thumbnail + main image).
-    #[serde(default)]
-    photos: Vec<String>,
-    // Date acquired in ISO "YYYY-MM-DD", or "" if unset. Used for date sorting.
-    #[serde(default)]
-    acquired_date: String,
-    // All fields including defaults are stored as custom_fields
-    custom_fields: Vec<CustomField>,
-}
-
-impl Item {
-    fn primary_photo(&self) -> Option<&str> {
-        self.photos.first().map(|s| s.as_str()).filter(|s| !s.is_empty())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CustomField {
-    id: String,
-    label: String,
-    value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Template {
-    id: String,
-    name: String,
-    field_labels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct AppData {
-    collections: Vec<Collection>,
-    items: Vec<Item>,
-    #[serde(default)]
-    templates: Vec<Template>,
-}
-
-// ─── Default fields for new items ─────────────────────────────────────────────
-
-fn default_fields() -> Vec<CustomField> {
-    vec![
-        CustomField { id: Uuid::new_v4().to_string(), label: "CONDITION".into(),   value: "".into() },
-        CustomField { id: Uuid::new_v4().to_string(), label: "VALUE / PRICE".into(), value: "".into() },
-        CustomField { id: Uuid::new_v4().to_string(), label: "TAGS".into(),        value: "".into() },
-        CustomField { id: Uuid::new_v4().to_string(), label: "NOTES".into(),       value: "".into() },
-    ]
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Settings {
-    dark_mode: bool,
-    accent_hex: String,
-    left_panel_width: f32,
-    mid_panel_width: f32,
-    font_size: f32,
-    // Sort modes: see sort comparators. 0=name A-Z,1=name Z-A,2=count/date asc,3=count/date desc
-    #[serde(default)]
-    coll_sort: i32,
-    #[serde(default)]
-    item_sort: i32,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            dark_mode: true,
-            accent_hex: "#4f8ef7".into(),
-            left_panel_width: 220.0,
-            mid_panel_width: 268.0,
-            font_size: 15.0,
-            coll_sort: 0,
-            item_sort: 0,
-        }
-    }
-}
-
-// ─── Colour helpers ───────────────────────────────────────────────────────────
-
-fn hex(s: &str) -> slint::Color {
-    let s = s.trim_start_matches('#');
-    let v = u32::from_str_radix(s, 16).unwrap_or(0);
-    slint::Color::from_rgb_u8(((v>>16)&0xff) as u8, ((v>>8)&0xff) as u8, (v&0xff) as u8)
-}
-fn darken(c: slint::Color, t: f32) -> slint::Color {
-    slint::Color::from_rgb_u8(
-        (c.red()   as f32*(1.0-t)) as u8,
-        (c.green() as f32*(1.0-t)) as u8,
-        (c.blue()  as f32*(1.0-t)) as u8)
-}
-fn lighten(c: slint::Color, t: f32) -> slint::Color {
-    let l = |v: u8| (v as f32 + (255.0 - v as f32)*t) as u8;
-    slint::Color::from_rgb_u8(l(c.red()), l(c.green()), l(c.blue()))
-}
-fn with_alpha(c: slint::Color, a: f32) -> slint::Color {
-    slint::Color::from_argb_u8((a*255.0) as u8, c.red(), c.green(), c.blue())
-}
-fn color_to_hex(c: slint::Color) -> String {
-    format!("#{:02x}{:02x}{:02x}", c.red(), c.green(), c.blue())
-}
-
-// ─── Palette ──────────────────────────────────────────────────────────────────
-
-struct Palette {
-    bg_base:slint::Color, bg_panel:slint::Color, bg_surface:slint::Color,
-    bg_elevated:slint::Color, bg_card:slint::Color, bg_card_hover:slint::Color,
-    bg_selected:slint::Color, bg_input:slint::Color,
-    text_primary:slint::Color, text_secondary:slint::Color, text_muted:slint::Color,
-    border:slint::Color, danger_bg:slint::Color, danger_text:slint::Color,
-}
-
-fn dark_palette() -> Palette { Palette {
-    bg_base:hex("#0f1117"), bg_panel:hex("#161b24"), bg_surface:hex("#1e2535"),
-    bg_elevated:hex("#252d40"), bg_card:hex("#1a2130"), bg_card_hover:hex("#212a3e"),
-    bg_selected:hex("#1d3557"), bg_input:hex("#0f1117"),
-    text_primary:hex("#e8edf5"), text_secondary:hex("#8896b0"), text_muted:hex("#4a5568"),
-    border:hex("#252d40"), danger_bg:hex("#3d1515"), danger_text:hex("#f87171"),
-}}
-
-fn light_palette() -> Palette { Palette {
-    bg_base:hex("#f4f6fb"), bg_panel:hex("#ffffff"), bg_surface:hex("#edf0f7"),
-    bg_elevated:hex("#e2e6f0"), bg_card:hex("#f8f9fd"), bg_card_hover:hex("#eef1f8"),
-    bg_selected:hex("#dce8ff"), bg_input:hex("#ffffff"),
-    text_primary:hex("#0f1117"), text_secondary:hex("#4a5568"), text_muted:hex("#9aa3b5"),
-    border:hex("#d6dcea"), danger_bg:hex("#fff0f0"), danger_text:hex("#e53935"),
-}}
-
-fn apply_theme(ui: &AppWindow, dark: bool, accent_hex: &str) {
-    let p = if dark { dark_palette() } else { light_palette() };
-    let t = ui.global::<Theme>();
-    t.set_dark_mode(dark);
-    t.set_bg_base(p.bg_base); t.set_bg_panel(p.bg_panel); t.set_bg_surface(p.bg_surface);
-    t.set_bg_elevated(p.bg_elevated); t.set_bg_card(p.bg_card); t.set_bg_card_hover(p.bg_card_hover);
-    t.set_bg_selected(p.bg_selected); t.set_bg_input(p.bg_input);
-    t.set_text_primary(p.text_primary); t.set_text_secondary(p.text_secondary); t.set_text_muted(p.text_muted);
-    t.set_border(p.border); t.set_danger_bg(p.danger_bg); t.set_danger_text(p.danger_text);
-    let accent = hex(accent_hex);
-    t.set_accent(accent); t.set_accent_dim(darken(accent, 0.42));
-    t.set_accent_glow(with_alpha(accent, 0.18)); t.set_accent_text(lighten(accent, 0.25));
-    t.set_border_accent(with_alpha(accent, 0.32));
-}
-
-// ─── Paths ────────────────────────────────────────────────────────────────────
-
-fn app_dir() -> PathBuf {
-    let mut p = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    p.push("Collectors-Notebook");
-    std::fs::create_dir_all(&p).ok();
-    p
-}
-fn photos_dir() -> PathBuf {
-    let mut p = app_dir(); p.push("photos");
-    std::fs::create_dir_all(&p).ok(); p
-}
-fn thumbs_dir() -> PathBuf {
-    let mut p = app_dir(); p.push("photos"); p.push("thumbnails");
-    std::fs::create_dir_all(&p).ok(); p
-}
-fn data_path()     -> PathBuf { let mut p = app_dir(); p.push("data.json");     p }
-fn settings_path() -> PathBuf { let mut p = app_dir(); p.push("settings.json"); p }
-
-// Copy an existing photo file to a new uniquely-named file in photos_dir.
-// Returns the new path string, or None if the source is missing/unreadable.
-fn copy_photo_file(src: &str) -> Option<String> {
-    if src.is_empty() { return None; }
-    let src_path = std::path::Path::new(src);
-    if !src_path.exists() { return None; }
-    let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-    let dest = photos_dir().join(format!("{}.{}", Uuid::new_v4(), ext));
-    std::fs::copy(src_path, &dest).ok()?;
-    let dest_str = dest.to_string_lossy().to_string();
-    generate_thumbnail(&dest_str);
-    Some(dest_str)
-}
-
-// ─── Persistence ──────────────────────────────────────────────────────────────
-
-fn load_data() -> AppData {
-    std::fs::read_to_string(data_path()).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn save_data(data: &AppData) {
-    if let Ok(json) = serde_json::to_string_pretty(data) {
-        std::fs::write(data_path(), json).ok();
-    }
-}
-
-fn load_settings() -> Settings {
-    std::fs::read_to_string(settings_path()).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn save_settings(s: &Settings) {
-    if let Ok(json) = serde_json::to_string_pretty(s) {
-        std::fs::write(settings_path(), json).ok();
-    }
-}
-
-// ─── Model helpers ────────────────────────────────────────────────────────────
-
-fn to_slint_collections(data: &AppData) -> slint::ModelRc<CollectionData> {
-    collections_model(data, "")
-}
-
-// Collections sort the UNDERLYING vector (not just display) so the stable-index
-// selection model stays correct. Call before building the model.
-fn sort_collections(data: &mut AppData, mode: i32) {
-    match mode {
-        1 => data.collections.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-        2 => data.collections.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase())),
-        3 => {
-            let count = |id: &str| data.items.iter().filter(|i| i.collection_id == id).count();
-            let counts: std::collections::HashMap<String, usize> =
-                data.collections.iter().map(|c| (c.id.clone(), count(&c.id))).collect();
-            data.collections.sort_by(|a, b| counts[&a.id].cmp(&counts[&b.id]));
-        }
-        4 => {
-            let count = |id: &str| data.items.iter().filter(|i| i.collection_id == id).count();
-            let counts: std::collections::HashMap<String, usize> =
-                data.collections.iter().map(|c| (c.id.clone(), count(&c.id))).collect();
-            data.collections.sort_by(|a, b| counts[&b.id].cmp(&counts[&a.id]));
-        }
-        _ => {} // 0 = date added: leave in insertion order
-    }
-}
-
-fn collections_model(data: &AppData, search: &str) -> slint::ModelRc<CollectionData> {
-    let s = search.to_lowercase();
-    let v: Vec<CollectionData> = data.collections.iter().map(|c| {
-        let count = data.items.iter().filter(|i| i.collection_id == c.id).count();
-        let row_match = s.is_empty() || c.name.to_lowercase().contains(&s);
-        CollectionData {
-            id: c.id.clone().into(), name: c.name.clone().into(),
-            icon: c.icon.clone().into(), item_count: count as i32,
-            row_match,
-        }
-    }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
-}
-
-// Truncate text to at most `limit` words, cutting at the word boundary.
-fn truncate_words(text: &str, limit: usize) -> String {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() <= limit { return text.to_string(); }
-    words[..limit].join(" ")
-}
-
-fn load_slint_image(path: &str) -> Option<slint::Image> {
-    let img = image::open(path).ok()?.into_rgba8();
-    let (w, h) = img.dimensions();
-    let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), w, h);
-    Some(slint::Image::from_rgba8(buf))
-}
-
-// The cached-thumbnail path for an original photo: "<thumbs_dir>/<filename>.jpg"
-fn thumb_path_for(original: &str) -> PathBuf {
-    let p = std::path::Path::new(original);
-    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("thumb");
-    thumbs_dir().join(format!("{}.jpg", stem))
-}
-
-// Generate (or regenerate) a cached thumbnail for an original photo.
-// 400px so it stays crisp on the card grid and the ~100px detail image.
-fn generate_thumbnail(original: &str) {
-    if original.is_empty() { return; }
-    if let Ok(img) = image::open(original) {
-        let thumb = img.resize(400, 400, image::imageops::FilterType::Lanczos3);
-        let dest = thumb_path_for(original);
-        thumb.to_rgb8().save_with_format(&dest, image::ImageFormat::Jpeg).ok();
-    }
-}
-
-// Delete an original photo AND its cached thumbnail.
-fn delete_photo_files(original: &str) {
-    if original.is_empty() { return; }
-    std::fs::remove_file(original).ok();
-    std::fs::remove_file(thumb_path_for(original)).ok();
-}
-
-fn thumbnail_image(path: &str) -> slint::Image {
-    if path.is_empty() { return slint::Image::default(); }
-    // Prefer the cached thumbnail; generate it if missing, then load it.
-    let thumb = thumb_path_for(path);
-    if !thumb.exists() {
-        generate_thumbnail(path);
-    }
-    if let Some(t) = thumb.to_str() {
-        if let Some(img) = load_slint_image(t) {
-            return img;
-        }
-    }
-    // Fallback: decode original directly (e.g. thumb generation failed)
-    if let Ok(img) = image::open(path) {
-        let thumb = img.resize(400, 400, image::imageops::FilterType::Lanczos3).into_rgba8();
-        let (w, h) = thumb.dimensions();
-        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(thumb.as_raw(), w, h);
-        return slint::Image::from_rgba8(buf);
-    }
-    slint::Image::default()
-}
-
-// ─── Sorting ──────────────────────────────────────────────────────────────────
-// Item sort modes: 0=name A-Z, 1=name Z-A, 2=date oldest, 3=date newest
-// Coll sort modes: 0=name A-Z, 1=name Z-A, 2=count low-high, 3=count high-low
+// Bundled fonts. Provide these files (see assets/README). Noto Color Emoji gives
+// full-color glyphs that never clip because we always pair a font size with a
+// matching line_height (see helpers `body`, `emoji`, etc.).
 //
-// Sort modes live in thread-locals so the many model-building call sites don't
-// each need a sort argument threaded through them.
-thread_local! {
-    static ITEM_SORT: std::cell::Cell<i32> = std::cell::Cell::new(0);
-    static COLL_SORT: std::cell::Cell<i32> = std::cell::Cell::new(0);
-}
-fn set_item_sort(m: i32) { ITEM_SORT.with(|c| c.set(m)); }
-fn get_item_sort() -> i32 { ITEM_SORT.with(|c| c.get()) }
-fn set_coll_sort(m: i32) { COLL_SORT.with(|c| c.set(m)); }
-#[allow(dead_code)]
-fn get_coll_sort() -> i32 { COLL_SORT.with(|c| c.get()) }
+// The CJK family ("Noto Sans CJK SC") is provided as two faces — Regular and
+// Bold — used for all user-entered input text. Both share the same family name
+// and differ only by weight, so `CJK` selects Regular and `CJK_BOLD` selects the
+// Bold face of the same family.
+const UI_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+const CJK_FONT_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSansCJK-Regular-subset.otf");
+const CJK_FONT_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSansCJK-Bold-subset.otf");
+const EMOJI_FONT: &[u8] = include_bytes!("../assets/fonts/NotoColorEmoji.ttf");
 
-fn sort_items(items: &mut Vec<&Item>, mode: i32) {
-    match mode {
-        1 => items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-        2 => items.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase())),
-        3 => items.sort_by(|a, b| cmp_dates(&a.acquired_date, &b.acquired_date, true)),
-        4 => items.sort_by(|a, b| cmp_dates(&a.acquired_date, &b.acquired_date, false)),
-        _ => {} // 0 = date added: leave in insertion order
-    }
+const EMOJI: iced::Font = iced::Font::with_name("Noto Color Emoji");
+const CJK: iced::Font = iced::Font::with_name("Noto Sans CJK SC");
+const CJK_BOLD: iced::Font = iced::Font {
+    weight: iced::font::Weight::Bold,
+    ..iced::Font::with_name("Noto Sans CJK SC")
+};
+
+// Window/taskbar icon, embedded at compile time. Using include_bytes! means the
+// path is resolved relative to THIS source file at build time, so it works no
+// matter what the runtime working directory is (the previous runtime from_file
+// approach failed because relative paths resolved against the .exe's launch dir).
+const APP_ICON: &[u8] = include_bytes!("../assets/icons/Collectors-Notebook.png");
+// Logo shown at the bottom of the Settings panel. Embedded so it always loads.
+const APP_LOGO: &[u8] = include_bytes!("../assets/logo.png");
+// Build the logo image handle ONCE. Rebuilding it every view() (which happens
+// on every mouse move) makes the renderer reload the texture and flicker.
+static LOGO_HANDLE: std::sync::LazyLock<image_widget::Handle> =
+    std::sync::LazyLock::new(|| image_widget::Handle::from_bytes(APP_LOGO.to_vec()));
+// Stable scrollable identities so scroll offset survives view rebuilds (e.g.
+// when a context-menu overlay opens on right-click). scrollable::Id isn't
+// exported in this build, so we use the generic advanced widget Id, which
+// scrollable's .id() accepts via Into<widget::Id>.
+static COLL_SCROLL: std::sync::LazyLock<iced::advanced::widget::Id> =
+    std::sync::LazyLock::new(iced::advanced::widget::Id::unique);
+static ITEM_SCROLL: std::sync::LazyLock<iced::advanced::widget::Id> =
+    std::sync::LazyLock::new(iced::advanced::widget::Id::unique);
+
+fn main() -> iced::Result {
+    // None lets it guess the format from the PNG header — reliable and avoids
+    // pinning an `image::ImageFormat` path that can drift between crate versions.
+    let icon = iced::window::icon::from_file_data(APP_ICON, None).ok();
+
+    let window = iced::window::Settings {
+        size: iced::Size::new(1200.0, 760.0),
+        icon,
+        ..Default::default()
+    };
+
+    iced::application(App::new, App::update, App::view)
+        .title("Collector's Notebook")
+        .theme(App::theme)
+        .subscription(App::subscription)
+        .font(UI_FONT)
+        .font(CJK_FONT_REGULAR)
+        .font(CJK_FONT_BOLD)
+        .font(EMOJI_FONT)
+        .window(window)
+        .run()
 }
 
-// Compare two ISO dates. Undated ("") always sorts LAST regardless of direction.
-// ascending=true => old to new; false => new to old.
-fn cmp_dates(a: &str, b: &str, ascending: bool) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    let ae = a.is_empty(); let be = b.is_empty();
-    match (ae, be) {
-        (true, true)  => Ordering::Equal,
-        (true, false) => Ordering::Greater, // a undated -> after b
-        (false, true) => Ordering::Less,    // b undated -> after a
-        (false, false) => if ascending { a.cmp(b) } else { b.cmp(a) },
-    }
+// Which of the three resizable panes a pane_grid cell represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PaneId {
+    Left,
+    Mid,
+    Right,
 }
 
-fn to_slint_items(data: &AppData, coll_id: &str, search: &str) -> slint::ModelRc<ItemData> {
-    let items = filtered_items(data, coll_id, search);
-    let v: Vec<ItemData> = items.iter().map(|i| {
-        let has_photo = i.primary_photo().is_some();
-        let thumbnail = if let Some(p) = i.primary_photo() {
-            thumbnail_image(p)
-        } else { slint::Image::default() };
-        ItemData {
-            id: i.id.clone().into(), name: i.name.clone().into(),
-            short_desc: i.short_desc.clone().into(),
-            has_photo, thumbnail,
-            collection_id: i.collection_id.clone().into(),
+/// Build the three-pane layout from the current ratios. Nested vertical splits:
+/// [Left | [Mid | Right]]. Outer ratio = left's share of the whole; inner ratio
+/// = mid's share of the remaining space. Ratios are clamped to the allowed caps.
+fn build_panes(settings: &Settings) -> pane_grid::State<PaneId> {
+    pane_grid::State::with_configuration(
+        pane_grid::Configuration::Split {
+            axis: pane_grid::Axis::Vertical,
+            ratio: settings.left_ratio.clamp(0.08, 0.33),
+            a: Box::new(pane_grid::Configuration::Pane(PaneId::Left)),
+            b: Box::new(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: settings.mid_ratio.clamp(0.12, 0.7),
+                a: Box::new(pane_grid::Configuration::Pane(PaneId::Mid)),
+                b: Box::new(pane_grid::Configuration::Pane(PaneId::Right)),
+            }),
+        },
+    )
+}
+
+// ─── Which overlay (if any) is open ─────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+enum Overlay {
+    None,
+    Settings,
+    IconPicker,                 // target collection index stored in `icon_target`
+    TemplatePicker,
+    Lightbox,
+    NameInput,                  // rename coll/item or save-template
+    ContextMenu,                // collection or item, see ctx fields
+    Enlarge,                    // big editable view of one detail field
+}
+
+// Which detail editor the Enlarge overlay is editing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EnlargeTarget {
+    Name,
+    Desc,
+    Field(usize),
+}
+
+#[derive(Debug, Clone)]
+enum NamePurpose {
+    RenameColl(usize),
+    RenameItem(usize),          // filtered index
+    SaveTemplate,
+}
+
+// ─── Per-field editors for the detail pane ──────────────────────────────────
+// Every text field is a scrollable multiline editor (text_editor::Content),
+// satisfying "all text fields multiline scrollable, no word limit".
+
+struct DetailEditors {
+    name: EdContent,
+    desc: EdContent,
+    year: EdContent,
+    month: EdContent,
+    day: EdContent,
+    fields: Vec<(String, EdContent, EdContent)>, // (field_id, label_editor, value_editor)
+}
+
+impl DetailEditors {
+    fn empty() -> Self {
+        Self {
+            name: EdContent::new(),
+            desc: EdContent::new(),
+            year: EdContent::new(),
+            month: EdContent::new(),
+            day: EdContent::new(),
+            fields: Vec::new(),
         }
-    }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
-}
-
-fn to_slint_fields(item: &Item) -> slint::ModelRc<FieldData> {
-    let v: Vec<FieldData> = item.custom_fields.iter().map(|f| FieldData {
-        id: f.id.clone().into(), label: f.label.clone().into(), value: f.value.clone().into(),
-    }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
-}
-
-fn to_slint_templates(data: &AppData) -> slint::ModelRc<TemplateData> {
-    let v: Vec<TemplateData> = data.templates.iter().map(|t| TemplateData {
-        id: t.id.clone().into(), name: t.name.clone().into(),
-        field_labels: t.field_labels.join(", ").into(),
-    }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
-}
-
-fn bool_model(len: usize) -> slint::ModelRc<CheckedItem> {
-    let v: Vec<CheckedItem> = (0..len).map(|_| CheckedItem { checked: false }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
-}
-
-fn clear_detail(ui: &AppWindow) {
-    ui.set_detail_name("".into()); ui.set_detail_desc("".into());
-    ui.set_detail_year("".into()); ui.set_detail_month("".into()); ui.set_detail_day("".into());
-    ui.set_detail_has_photo(false);
-    ui.set_detail_photo(slint::Image::default());
-    ui.set_detail_photos(slint::ModelRc::new(slint::VecModel::from(vec![])));
-    ui.set_detail_fields(slint::ModelRc::new(slint::VecModel::from(vec![])));
-}
-
-fn load_detail(ui: &AppWindow, item: &Item) {
-    ui.set_detail_name(item.name.clone().into());
-    ui.set_detail_desc(item.short_desc.clone().into());
-    // Split ISO acquired_date "YYYY-MM-DD" into the three boxes (blank if empty)
-    let (y, m, d) = split_iso_date(&item.acquired_date);
-    ui.set_detail_year(y.into());
-    ui.set_detail_month(m.into());
-    ui.set_detail_day(d.into());
-    let has_photo = item.primary_photo().is_some();
-    ui.set_detail_has_photo(has_photo);
-    if let Some(p) = item.primary_photo() {
-        // Use the cached thumbnail for the 140px main image (fast). The full
-        // original is only decoded when the user opens the lightbox.
-        ui.set_detail_photo(thumbnail_image(p));
-    } else {
-        ui.set_detail_photo(slint::Image::default());
     }
-    // Build the horizontal photo-strip model (small thumbnails of all photos)
-    ui.set_detail_photos(to_slint_photos(item));
-    ui.set_detail_fields(to_slint_fields(item));
+    fn from_item(item: &Item) -> Self {
+        let (y, m, d) = split_date(&item.acquired_date);
+        Self {
+            name: EdContent::with_text(&item.name),
+            desc: EdContent::with_text(&item.short_desc),
+            year: EdContent::with_text(&y),
+            month: EdContent::with_text(&m),
+            day: EdContent::with_text(&d),
+            fields: item.custom_fields.iter()
+                .map(|f| (f.id.clone(), EdContent::with_text(&f.label), EdContent::with_text(&f.value)))
+                .collect(),
+        }
+    }
 }
 
-// Build the photo-strip model: one entry per photo, using cached thumbnails.
-fn to_slint_photos(item: &Item) -> slint::ModelRc<PhotoData> {
-    let v: Vec<PhotoData> = item.photos.iter().enumerate()
-        .filter(|(_, p)| !p.is_empty())
-        .map(|(idx, p)| PhotoData {
-            index: idx as i32,
-            is_main: idx == 0,
-            thumbnail: thumbnail_image(p),
-        }).collect();
-    slint::ModelRc::new(slint::VecModel::from(v))
+// ─── Application state ──────────────────────────────────────────────────────
+
+struct App {
+    data: AppData,
+    settings: Settings,
+    palette: Palette,
+
+    // Resizable three-pane layout (collections | items | detail).
+    panes: pane_grid::State<PaneId>,
+
+    sel_coll: Option<String>,
+    sel_item: Option<String>,
+    item_search: String,
+    coll_search: String,
+
+    // multi-select
+    coll_checked: Vec<bool>,    // parallel to data.collections after sort
+    item_checked: Vec<bool>,    // parallel to current filtered item view
+    coll_multi: bool,
+    item_multi: bool,
+    anchor_coll: Option<usize>,
+    anchor_item: Option<usize>,
+
+    is_editing: bool,
+    editors: DetailEditors,
+    status: String,
+
+    overlay: Overlay,
+    icon_target: Option<usize>,
+
+    // name-input modal
+    name_value: EdContent,
+    name_title: String,
+    name_purpose: Option<NamePurpose>,
+
+    // context menu
+    ctx_is_collection: bool,
+    ctx_multi: bool,
+    ctx_target: usize,
+    // Stable id of the right-clicked row, captured at menu-open time. The
+    // positional `ctx_target` can go stale if the list reorders between the
+    // right-click and the chosen action; the Ctx* handlers re-resolve this id
+    // to a fresh index just before dispatching.
+    ctx_target_id: Option<String>,
+    ctx_pos: iced::Point,   // where the menu should anchor (cursor at right-click)
+
+    // lightbox
+    lightbox_handle: Option<image_widget::Handle>,
+    lightbox_index: usize,
+    lightbox_count: usize,
+
+    // template rename inline state
+    template_rename: Option<(String, EdContent)>, // (template_id, editor)
+
+    // live keyboard modifier state (for ctrl/shift-click multi-select)
+    modifiers: iced::keyboard::Modifiers,
+    // live cursor position, tracked so the context menu can open at the cursor
+    cursor: iced::Point,
+    // which detail field the Enlarge overlay is editing (if any)
+    enlarge_target: Option<EnlargeTarget>,
+    // Hovered row indices for hover highlighting (mouse_area can't style itself).
+    hover_coll: Option<usize>,
+    hover_item: Option<usize>,
+    // True while the cursor is over the main detail photo, so a hover prompt can
+    // be overlaid ("add more photos" in edit mode, "click to enlarge" otherwise).
+    hover_main_photo: bool,
+    // Live window width/height, tracked so panel-relative truncation budgets
+    // and overlay positioning are accurate at any window size (not a fixed
+    // nominal).
+    window_w: f32,
+    window_h: f32,
+    // Cache of decoded thumbnail handles, keyed by stored filename, so each
+    // thumbnail is decoded once instead of every view() frame. RefCell because
+    // view(&self) is immutable but needs to populate the cache lazily.
+    thumb_cache: std::cell::RefCell<std::collections::HashMap<String, image_widget::Handle>>,
 }
 
-fn flush_detail(ui: &AppWindow, item: &mut Item) {
-    item.name       = ui.get_detail_name().to_string();
-    item.short_desc = ui.get_detail_desc().to_string();
-    item.acquired_date = assemble_iso_date(
-        &ui.get_detail_year().to_string(),
-        &ui.get_detail_month().to_string(),
-        &ui.get_detail_day().to_string(),
-    );
-    // Fields are saved live via custom-field-value-changed, so no flush needed here
+// ─── Messages ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+enum Message {
+    // selection
+    SelectCollection(usize),
+    SelectItem(usize),
+    ToggleCollCheck(usize),
+    ToggleItemCheck(usize),
+    ClearSelection,
+    ModifiersChanged(iced::keyboard::Modifiers),
+    EscapePressed,
+    CursorMoved(iced::Point),
+    WindowResized(f32, f32),
+
+    // collection CRUD
+    NewCollection,
+    DeleteCollection(usize),
+    DuplicateCollection(usize),
+    DeleteSelectedCollections,
+    DuplicateSelectedCollections,
+
+    // item CRUD
+    NewItem,
+    DeleteItem,
+    DuplicateItem,
+    DeleteSelectedItems,
+    DuplicateSelectedItems,
+
+    // editing
+    ToggleEdit,
+    NameEdited(EdAction),
+    DescEdited(EdAction),
+    YearEdited(EdAction),
+    MonthEdited(EdAction),
+    DayEdited(EdAction),
+    FieldLabelEdited(usize, EdAction),
+    FieldValueEdited(usize, EdAction),
+    AddCustomField,
+    DeleteCustomField(String),
+
+    // search
+    ItemSearchChanged(String),
+    CollSearchChanged(String),
+    ClearItemSearch,
+    ClearCollSearch,
+
+    // sort
+    SetCollSort(SortMode),
+    SetItemSort(SortMode),
+
+    // photos
+    PickPhotos,
+    PhotosPicked(Vec<String>),  // already copied into store
+    RemovePhoto(usize),
+    SetMainPhoto(usize),
+    OpenLightbox(usize),
+    LightboxPrev,
+    LightboxNext,
+    LightboxArrowPrev,
+    LightboxArrowNext,
+
+    // templates
+    OpenTemplatePicker,
+    ApplyTemplate(String),
+    DeleteTemplate(String),
+    StartTemplateRename(String),
+    TemplateRenameEdited(EdAction),
+    CommitTemplateRename,
+
+    // icon
+    OpenIconPicker(usize),
+    IconPicked(String),
+
+    // name modal
+    OpenRenameCollection(usize),
+    OpenRenameItem(usize),
+    OpenSaveTemplate,
+    OpenEnlarge(EnlargeTarget),
+    HoverColl(Option<usize>),
+    HoverItem(Option<usize>),
+    HoverMainPhoto(bool),
+    NameValueEdited(EdAction),
+    NameAccepted,
+
+    // context menu
+    CollRightClicked(usize),
+    ItemRightClicked(usize),
+    CtxRename,
+    CtxPrimary,
+    CtxDanger,
+
+    // settings
+    OpenSettings,
+    SetDarkMode(bool),
+    SetAccent(Color),
+    FontInc,
+    FontDec,
+    ExportData,
+    ImportData,
+    ImportLoaded(Option<AppData>),
+    OpenDataFolder,
+    ResetPanels,
+
+    CloseOverlay,
+    Noop,
+    PaneResized(pane_grid::ResizeEvent),
 }
 
-// "2023-03-15" -> ("2023","03","15"); "" -> ("","",""); zero parts -> blank
-fn split_iso_date(iso: &str) -> (String, String, String) {
-    if iso.is_empty() { return (String::new(), String::new(), String::new()); }
-    let parts: Vec<&str> = iso.split('-').collect();
-    let blank_if_zero = |s: &str| {
-        let n: i32 = s.parse().unwrap_or(0);
-        if n == 0 { String::new() } else { s.to_string() }
-    };
-    let y = blank_if_zero(parts.get(0).copied().unwrap_or(""));
-    let m = blank_if_zero(parts.get(1).copied().unwrap_or(""));
-    let d = blank_if_zero(parts.get(2).copied().unwrap_or(""));
-    (y, m, d)
-}
+// ─── Construction ───────────────────────────────────────────────────────────
 
-// Assemble three boxes into ISO. All-blank => "" (undated). Otherwise blanks
-// become zeros so partial dates are preserved: blank year=0000, blank month/day=00.
-// Values clamped to sane ranges (month 1-12, day 1-31) only when non-zero.
-fn assemble_iso_date(y: &str, m: &str, d: &str) -> String {
-    let yt = y.trim(); let mt = m.trim(); let dt = d.trim();
-    if yt.is_empty() && mt.is_empty() && dt.is_empty() { return String::new(); }
-    let year: i32 = yt.parse().unwrap_or(0).clamp(0, 9999);
-    let month: i32 = {
-        let v = mt.parse().unwrap_or(0);
-        if v == 0 { 0 } else { v.clamp(1, 12) }
-    };
-    let day: i32 = {
-        let v = dt.parse().unwrap_or(0);
-        if v == 0 { 0 } else { v.clamp(1, 31) }
-    };
-    format!("{:04}-{:02}-{:02}", year, month, day)
-}
+impl App {
+    fn new() -> (Self, Task<Message>) {
+        let mut data = load_data();
+        let settings = load_settings();
+        sort_collections(&mut data, settings.coll_sort);
+        let palette = build_palette(settings.dark_mode, &settings.accent_hex);
+        let coll_checked = vec![false; data.collections.len()];
 
-fn set_status(ui: &AppWindow, msg: impl Into<slint::SharedString>) {
-    ui.set_status_message(msg.into());
-}
+        let panes = build_panes(&settings);
 
-// ─── Filtered item list (same filter as UI) ───────────────────────────────────
+        let app = Self {
+            coll_checked,
+            item_checked: Vec::new(),
+            data,
+            settings,
+            palette,
+            panes,
+            sel_coll: None,
+            sel_item: None,
+            item_search: String::new(),
+            coll_search: String::new(),
+            coll_multi: false,
+            item_multi: false,
+            anchor_coll: None,
+            anchor_item: None,
+            is_editing: false,
+            editors: DetailEditors::empty(),
+            status: String::new(),
+            overlay: Overlay::None,
+            icon_target: None,
+            name_value: EdContent::new(),
+            name_title: String::new(),
+            name_purpose: None,
+            ctx_is_collection: false,
+            ctx_multi: false,
+            ctx_target: 0,
+            ctx_target_id: None,
+            ctx_pos: iced::Point::ORIGIN,
+            lightbox_handle: None,
+            lightbox_index: 0,
+            lightbox_count: 0,
+            template_rename: None,
+            modifiers: iced::keyboard::Modifiers::default(),
+            cursor: iced::Point::ORIGIN,
+            enlarge_target: None,
+            hover_coll: None,
+            hover_item: None,
+            hover_main_photo: false,
+            window_w: 1200.0,
+            window_h: 760.0,
+            thumb_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+        };
+        (app, Task::none())
+    }
 
-fn filtered_items<'a>(data: &'a AppData, coll_id: &str, search: &str) -> Vec<&'a Item> {
-    let search_lc = search.to_lowercase();
-    let mut v: Vec<&Item> = data.items.iter()
-        .filter(|i| i.collection_id == coll_id)
-        .filter(|i| {
-            if search_lc.is_empty() { return true; }
-            let fields_match = i.custom_fields.iter().any(|f|
-                f.value.to_lowercase().contains(&search_lc) ||
-                f.label.to_lowercase().contains(&search_lc)
-            );
-            i.name.to_lowercase().contains(&search_lc)
-                || i.short_desc.to_lowercase().contains(&search_lc)
-                || fields_match
+    fn theme(&self) -> IcedTheme {
+        // We render colors manually from `self.palette`; use a neutral base theme.
+        if self.settings.dark_mode { IcedTheme::Dark } else { IcedTheme::Light }
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        use iced::event::{self, Event};
+        use iced::keyboard::{self, key::Named, Key};
+        use iced::mouse;
+        // In iced 0.14 the per-key subscriptions were unified; we listen to all
+        // events and pick out modifier changes (for ctrl/shift-click), Escape,
+        // and cursor moves (so the context menu can open at the cursor).
+        event::listen_with(|evt, _status, _window| match evt {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                Some(Message::ModifiersChanged(m))
+            }
+            // Fire on Escape regardless of capture status. A focused search
+            // text_input captures the first Escape (to unfocus), which used to
+            // swallow it; handling both Ignored and Captured makes a single
+            // Escape clear the search.
+            Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(Named::Escape), .. }) => {
+                Some(Message::EscapePressed)
+            }
+            // Left/Right arrows navigate the lightbox (gated in update so they
+            // do nothing when the lightbox isn't open).
+            Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(Named::ArrowLeft), .. }) => {
+                Some(Message::LightboxArrowPrev)
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key: Key::Named(Named::ArrowRight), .. }) => {
+                Some(Message::LightboxArrowNext)
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                Some(Message::CursorMoved(position))
+            }
+            Event::Window(iced::window::Event::Resized(size)) => {
+                Some(Message::WindowResized(size.width, size.height))
+            }
+            _ => None,
         })
-        .collect();
-    sort_items(&mut v, get_item_sort());
-    v
+    }
+
+    // ── view-model helpers ──────────────────────────────────────────────────
+
+    fn current_items(&self) -> Vec<&Item> {
+        let coll_id = self.sel_coll.clone().unwrap_or_default();
+        filtered_items(&self.data, &coll_id, &self.item_search, self.settings.item_sort)
+    }
+
+    fn selected_item(&self) -> Option<&Item> {
+        let id = self.sel_item.as_ref()?;
+        self.data.items.iter().find(|i| &i.id == id)
+    }
+
+    // Approximate pixel widths for truncation budgets. pane_grid is ratio-based
+    // and the window is resizable, so these use a nominal window width; exact
+    // precision isn't needed since truncation is itself approximate.
+    fn nominal_window_w(&self) -> f32 { self.window_w.max(400.0) }
+    fn nominal_window_h(&self) -> f32 { self.window_h.max(300.0) }
+
+    /// Thumbnail handle for `stored`, decoded once and cached. Returns None if
+    /// the image can't be loaded.
+    fn thumb(&self, stored: &str) -> Option<image_widget::Handle> {
+        if stored.is_empty() { return None; }
+        if let Some(h) = self.thumb_cache.borrow().get(stored) {
+            return Some(h.clone());
+        }
+        let handle = image_util::thumbnail_handle(stored)?;
+        {
+            let mut cache = self.thumb_cache.borrow_mut();
+            // Soft cap so a long session with many distinct photos can't grow the
+            // cache without bound. Far more than fit on screen, so this only
+            // trims long-cold entries. (Photos are UUID-named, so a re-inserted
+            // key is always the same image — no stale-content risk.)
+            const MAX_THUMB_CACHE: usize = 512;
+            if cache.len() >= MAX_THUMB_CACHE {
+                cache.clear();
+            }
+            cache.insert(stored.to_string(), handle.clone());
+        }
+        Some(handle)
+    }
+
+    /// Drop a single cached thumbnail handle (e.g. when its photo is removed),
+    /// so the cache doesn't retain handles for files that no longer exist.
+    fn evict_thumb(&self, stored: &str) {
+        if stored.is_empty() { return; }
+        self.thumb_cache.borrow_mut().remove(stored);
+    }
+    fn left_px(&self) -> f32 {
+        self.nominal_window_w() * self.settings.left_ratio
+    }
+    fn mid_px(&self) -> f32 {
+        // Mid pane's share of the width remaining after the left pane.
+        self.nominal_window_w() * (1.0 - self.settings.left_ratio) * self.settings.mid_ratio
+    }
+
+    fn rebuild_coll_checked(&mut self) {
+        self.coll_checked = vec![false; self.data.collections.len()];
+        self.coll_multi = false;
+    }
+
+    fn rebuild_item_checked(&mut self) {
+        self.item_checked = vec![false; self.current_items().len()];
+        self.item_multi = false;
+    }
+
+    fn reload_editors(&mut self) {
+        self.editors = match self.selected_item() {
+            Some(it) => DetailEditors::from_item(it),
+            None => DetailEditors::empty(),
+        };
+        // Clear any lingering main-photo hover so the "add more photos" prompt
+        // doesn't stick when the selected item or edit state changes.
+        self.hover_main_photo = false;
+    }
+
+    fn persist(&self) {
+        save_data(&self.data);
+    }
+    fn persist_settings(&self) {
+        save_settings(&self.settings);
+    }
+    fn reapply_theme(&mut self) {
+        self.palette = build_palette(self.settings.dark_mode, &self.settings.accent_hex);
+    }
 }
 
-// ─── Entry Point ──────────────────────────────────────────────────────────────
-
-fn main() {
-    let mut app_data = load_data();
-    let settings  = load_settings();
-    let ui        = AppWindow::new().expect("Failed to create window");
-
-    // The window/title-bar icon is set in main.slint via @image-url so it has a
-    // valid image cache key (a runtime Image::from_rgba8 would be ignored by
-    // Slint's winit backend). The .exe/taskbar icon is embedded via build.rs.
-
-    // Initialize sort modes from settings before building any models
-    set_item_sort(settings.item_sort);
-    set_coll_sort(settings.coll_sort);
-    sort_collections(&mut app_data, settings.coll_sort);
-
-    apply_theme(&ui, settings.dark_mode, &settings.accent_hex);
-    ui.set_left_width(settings.left_panel_width);
-    ui.set_mid_width(settings.mid_panel_width);
-    ui.global::<Theme>().set_ui_font_size(settings.font_size);
-    ui.set_coll_sort_mode(settings.coll_sort);
-    ui.set_item_sort_mode(settings.item_sort);
-    ui.set_collections(to_slint_collections(&app_data));
-    ui.set_templates(to_slint_templates(&app_data));
-    ui.set_coll_checked(bool_model(app_data.collections.len()));
-    ui.set_item_checked(bool_model(0));
-
-    let data      = Rc::new(RefCell::new(app_data));
-    let cfg       = Rc::new(RefCell::new(settings));
-    let sel_coll  = Rc::new(RefCell::new(Option::<String>::None));
-    let sel_item  = Rc::new(RefCell::new(Option::<String>::None));
-    let search    = Rc::new(RefCell::new(String::new()));
-    let coll_search = Rc::new(RefCell::new(String::new()));
-    let ctx_coll_idx: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
-    let ctx_item_idx: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
-    let icon_target: Rc<RefCell<Option<usize>>>  = Rc::new(RefCell::new(None));
-    let anchor_coll: Rc<RefCell<Option<usize>>>  = Rc::new(RefCell::new(None));
-    let anchor_item: Rc<RefCell<Option<usize>>>  = Rc::new(RefCell::new(None));
-
-    macro_rules! weak { () => { ui.as_weak() }; }
-
-    // ── select-collection (with ctrl/shift multi-select) ──────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search, coll_search, anchor_coll) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone(), coll_search.clone(), anchor_coll.clone());
-        ui.on_select_collection(move |idx, ctrl, shift| {
-            let ui = ui_w.unwrap();
-            let d = data.borrow();
-            let n = d.collections.len();
-            if n == 0 { return; }
-            let idx_u = idx as usize;
-
-            let checked = ui.get_coll_checked();
-
-            if ctrl {
-                // Toggle just this one
-                if let Some(row) = checked.row_data(idx_u) {
-                    checked.set_row_data(idx_u, CheckedItem { checked: !row.checked });
-                }
-                *anchor_coll.borrow_mut() = Some(idx_u);
-                let cnt = (0..checked.row_count()).filter(|i| checked.row_data(*i).map(|c| c.checked).unwrap_or(false)).count();
-                ui.set_coll_multi_mode(cnt >= 1);
-                // Clear single-selection highlight when multi-selecting
-                ui.set_selected_collection(-1);
-                return;
-            }
-            if shift {
-                let anchor = anchor_coll.borrow().or_else(|| {
-                    let s = ui.get_selected_collection();
-                    if s >= 0 { Some(s as usize) } else { Some(0) }
-                }).unwrap_or(0);
-                *anchor_coll.borrow_mut() = Some(anchor);
-                let (lo, hi) = if anchor <= idx_u { (anchor, idx_u) } else { (idx_u, anchor) };
-                let q = coll_search.borrow().to_lowercase();
-                for i in 0..checked.row_count() {
-                    // Only select within range AND only if the row is visible under the filter
-                    let visible = q.is_empty()
-                        || d.collections.get(i).map(|c| c.name.to_lowercase().contains(&q)).unwrap_or(false);
-                    checked.set_row_data(i, CheckedItem { checked: i >= lo && i <= hi && visible });
-                }
-                ui.set_coll_multi_mode(true);
-                ui.set_selected_collection(-1);
-                return;
-            }
-
-            // Plain click — clear all checks, single select / deselect
-            for i in 0..checked.row_count() {
-                checked.set_row_data(i, CheckedItem { checked: false });
-            }
-            ui.set_coll_multi_mode(false);
-            *anchor_coll.borrow_mut() = Some(idx_u);
-
-            if ui.get_selected_collection() == idx {
-                *sel_coll.borrow_mut() = None;
-                *sel_item.borrow_mut() = None;
-                ui.set_selected_collection(-1);
-                ui.set_selected_item(-1);
-                ui.set_items(slint::ModelRc::new(slint::VecModel::from(vec![])));
-                ui.set_item_checked(bool_model(0));
-                ui.set_item_multi_mode(false);
-                clear_detail(&ui);
-                return;
-            }
-            if let Some(c) = d.collections.get(idx_u) {
-                *sel_coll.borrow_mut() = Some(c.id.clone());
-                *sel_item.borrow_mut() = None;
-                let items = to_slint_items(&d, &c.id, &search.borrow());
-                let cnt = items.row_count();
-                ui.set_items(items);
-                ui.set_item_checked(bool_model(cnt));
-                ui.set_item_multi_mode(false);   // clear item multi-select from previous collection
-                ui.set_selected_collection(idx);
-                ui.set_selected_item(-1);
-                ui.set_is_editing(false);
-                clear_detail(&ui);
-            }
-        });
-    }
-
-    // ── select-item (with ctrl/shift multi-select) ────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search, anchor_item) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone(), anchor_item.clone());
-        ui.on_select_item(move |idx, ctrl, shift| {
-            let ui = ui_w.unwrap();
-            let idx_u = idx as usize;
-            let checked = ui.get_item_checked();
-
-            if ctrl {
-                if let Some(row) = checked.row_data(idx_u) {
-                    checked.set_row_data(idx_u, CheckedItem { checked: !row.checked });
-                }
-                *anchor_item.borrow_mut() = Some(idx_u);
-                let cnt = (0..checked.row_count()).filter(|i| checked.row_data(*i).map(|c| c.checked).unwrap_or(false)).count();
-                ui.set_item_multi_mode(cnt >= 1);
-                // Clear single-selection highlight + detail when multi-selecting
-                ui.set_selected_item(-1);
-                ui.set_is_editing(false);
-                clear_detail(&ui);
-                return;
-            }
-            if shift {
-                let anchor = anchor_item.borrow().or_else(|| {
-                    let s = ui.get_selected_item();
-                    if s >= 0 { Some(s as usize) } else { Some(0) }
-                }).unwrap_or(0);
-                *anchor_item.borrow_mut() = Some(anchor);
-                let (lo, hi) = if anchor <= idx_u { (anchor, idx_u) } else { (idx_u, anchor) };
-                for i in 0..checked.row_count() {
-                    checked.set_row_data(i, CheckedItem { checked: i >= lo && i <= hi });
-                }
-                ui.set_item_multi_mode(true);
-                ui.set_selected_item(-1);
-                ui.set_is_editing(false);
-                clear_detail(&ui);
-                return;
-            }
-
-            // Plain click
-            for i in 0..checked.row_count() {
-                checked.set_row_data(i, CheckedItem { checked: false });
-            }
-            ui.set_item_multi_mode(false);
-            *anchor_item.borrow_mut() = Some(idx_u);
-
-            if ui.get_selected_item() == idx {
-                *sel_item.borrow_mut() = None;
-                ui.set_selected_item(-1);
-                ui.set_is_editing(false);
-                clear_detail(&ui);
-                return;
-            }
-            let d = data.borrow();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            let items = filtered_items(&d, &coll_id, &search.borrow());
-            if let Some(item) = items.get(idx_u) {
-                *sel_item.borrow_mut() = Some(item.id.clone());
-                ui.set_selected_item(idx);
-                ui.set_is_editing(false);
-                load_detail(&ui, item);
-            }
-        });
-    }
-
-    // ── new-collection ────────────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_new_collection(move || {
-            let ui = ui_w.unwrap();
-            let mut d = data.borrow_mut();
-            let icons = ["📁","📂","🎧","✒","📷","🎮","📚","⌚","💍","🎸"];
-            let count = d.collections.len();
-            let icon  = icons[count % icons.len()].to_string();
-            let name  = format!("New Collection {}", count + 1);
-            d.collections.push(Collection { id: Uuid::new_v4().to_string(), name, icon });
-            save_data(&d);
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_coll_checked(bool_model(d.collections.len()));
-        });
-    }
-
-    // ── delete-collection ─────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone());
-        ui.on_delete_collection(move |idx| {
-            let ui = ui_w.unwrap();
-            let mut d = data.borrow_mut();
-            if let Some(c) = d.collections.get(idx as usize) {
-                let cid = c.id.clone();
-                for item in d.items.iter().filter(|i| i.collection_id == cid) {
-                    for p in &item.photos { delete_photo_files(p); }
-                }
-                d.items.retain(|i| i.collection_id != cid);
-                d.collections.remove(idx as usize);
-                *sel_coll.borrow_mut() = None;
-                *sel_item.borrow_mut() = None;
-                save_data(&d);
-            }
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_coll_checked(bool_model(d.collections.len()));
-            ui.set_items(slint::ModelRc::new(slint::VecModel::from(vec![])));
-            ui.set_item_checked(bool_model(0));
-            ui.set_selected_collection(-1);
-            ui.set_selected_item(-1);
-            clear_detail(&ui);
-        });
-    }
-
-    // ── new-item ──────────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_new_item(move || {
-            let ui = ui_w.unwrap();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if coll_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            let new = Item {
-                id: Uuid::new_v4().to_string(),
-                collection_id: coll_id.clone(),
-                name: "New Item".into(),
-                custom_fields: default_fields(),
-                ..Default::default()
-            };
-            let nid = new.id.clone();
-            d.items.push(new);
-            save_data(&d);
-            let items = to_slint_items(&d, &coll_id, &search.borrow());
-            let n     = items.row_count();
-            let idx   = items.iter().position(|i| i.id.as_str() == nid).unwrap_or(0) as i32;
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            *sel_item.borrow_mut() = Some(nid.clone());
-            ui.set_selected_item(idx);
-            ui.set_is_editing(true);
-            if let Some(item) = d.items.iter().find(|i| i.id == nid) {
-                load_detail(&ui, item);
-            }
-            ui.set_collections(to_slint_collections(&d));
-        });
-    }
-
-    // ── delete-item ───────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_delete_item(move |_| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            {
-                let mut d = data.borrow_mut();
-                if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                    for p in &item.photos { delete_photo_files(p); }
-                }
-                d.items.retain(|i| i.id != item_id);
-                save_data(&d);
-            }
-            *sel_item.borrow_mut() = None;
-            let d = data.borrow();
-            let items = to_slint_items(&d, &coll_id, &search.borrow());
-            let n = items.row_count();
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            ui.set_selected_item(-1);
-            ui.set_is_editing(false);
-            clear_detail(&ui);
-            ui.set_collections(to_slint_collections(&d));
-        });
-    }
-
-    // ── duplicate-collection ──────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_duplicate_collection(move |idx| {
-            let ui = ui_w.unwrap();
-            let mut d = data.borrow_mut();
-            if let Some(src) = d.collections.get(idx as usize).cloned() {
-                let new_id = Uuid::new_v4().to_string();
-                let new_coll = Collection {
-                    id: new_id.clone(),
-                    name: format!("{} (copy)", src.name),
-                    icon: src.icon.clone(),
-                };
-                // Duplicate all items in this collection
-                let src_items: Vec<Item> = d.items.iter()
-                    .filter(|i| i.collection_id == src.id)
-                    .cloned()
-                    .collect();
-                d.collections.push(new_coll);
-                for mut item in src_items {
-                    item.id = Uuid::new_v4().to_string();
-                    item.collection_id = new_id.clone();
-                    item.photos = item.photos.iter().filter_map(|p| copy_photo_file(p)).collect();
-                    item.custom_fields = item.custom_fields.into_iter().map(|mut f| {
-                        f.id = Uuid::new_v4().to_string(); f
-                    }).collect();
-                    d.items.push(item);
-                }
-                save_data(&d);
-                ui.set_collections(to_slint_collections(&d));
-                ui.set_coll_checked(bool_model(d.collections.len()));
-                ui.set_status_message("".into());
-            }
-        });
-    }
-
-    // ── duplicate-item ────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_duplicate_item(move |_idx| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            let coll_id  = sel_coll.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let insert_at = {
-                let d = data.borrow();
-                d.items.iter().rposition(|i| i.id == item_id).map(|p| p + 1).unwrap_or_else(|| d.items.len())
-            };
-            let new_item = {
-                let d = data.borrow();
-                d.items.iter().find(|i| i.id == item_id).map(|src| {
-                    let mut n = src.clone();
-                    n.id = Uuid::new_v4().to_string();
-                    n.name = format!("{} (copy)", src.name);
-                    n.photos = src.photos.iter().filter_map(|p| copy_photo_file(p)).collect();
-                    n.custom_fields = n.custom_fields.into_iter().map(|mut f| {
-                        f.id = Uuid::new_v4().to_string(); f
-                    }).collect();
-                    n
-                })
-            };
-            if let Some(item) = new_item {
-                let mut d = data.borrow_mut();
-                d.items.insert(insert_at, item);
-                save_data(&d);
-                let items = to_slint_items(&d, &coll_id, &search.borrow());
-                let n = items.row_count();
-                ui.set_items(items);
-                ui.set_item_checked(bool_model(n));
-                ui.set_collections(to_slint_collections(&d));
-                ui.set_status_message("".into());
-            }
-        });
-    }
-
-    // ── delete-selected-items ─────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_delete_selected_items(move || {
-            let ui = ui_w.unwrap();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if coll_id.is_empty() { return; }
-            let checked = ui.get_item_checked();
-            let mut d = data.borrow_mut();
-            let to_delete: Vec<String> = {
-                let items = filtered_items(&d, &coll_id, &search.borrow());
-                items.iter().enumerate()
-                    .filter(|(i, _)| checked.row_data(*i).map(|c| c.checked).unwrap_or(false))
-                    .map(|(_, item)| item.id.clone())
-                    .collect()
-            };
-            for id in &to_delete {
-                if let Some(item) = d.items.iter().find(|i| &i.id == id) {
-                    for p in &item.photos { delete_photo_files(p); }
-                }
-            }
-            d.items.retain(|i| !to_delete.contains(&i.id));
-            save_data(&d);
-            *sel_item.borrow_mut() = None;
-            let items = to_slint_items(&d, &coll_id, &search.borrow());
-            let n = items.row_count();
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            ui.set_selected_item(-1);
-            clear_detail(&ui);
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_item_multi_mode(false);
-            ui.set_status_message("".into());
-        });
-    }
-
-    // ── duplicate-selected-items ──────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, search) =
-            (weak!(), data.clone(), sel_coll.clone(), search.clone());
-        ui.on_duplicate_selected_items(move || {
-            let ui = ui_w.unwrap();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if coll_id.is_empty() { return; }
-            let checked = ui.get_item_checked();
-            let mut d = data.borrow_mut();
-            let to_dup: Vec<Item> = {
-                let items = filtered_items(&d, &coll_id, &search.borrow());
-                items.iter().enumerate()
-                    .filter(|(i, _)| checked.row_data(*i).map(|c| c.checked).unwrap_or(false))
-                    .map(|(_, item)| (*item).clone())
-                    .collect()
-            };
-            for mut item in to_dup {
-                item.id = Uuid::new_v4().to_string();
-                item.name = format!("{} (copy)", item.name);
-                item.photos = item.photos.iter().filter_map(|p| copy_photo_file(p)).collect();
-                item.custom_fields = item.custom_fields.into_iter().map(|mut f| {
-                    f.id = Uuid::new_v4().to_string(); f
-                }).collect();
-                d.items.push(item);
-            }
-            save_data(&d);
-            let items = to_slint_items(&d, &coll_id, &search.borrow());
-            let n = items.row_count();
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_item_multi_mode(false);
-            ui.set_status_message("".into());
-        });
-    }
-
-    // ── toggle-edit / save ────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_toggle_edit(move || {
-            let ui = ui_w.unwrap();
-            if ui.get_is_editing() {
-                let item_id = sel_item.borrow().clone().unwrap_or_default();
-                let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-                if item_id.is_empty() { ui.set_is_editing(false); return; }
-                {
-                    let mut d = data.borrow_mut();
-                    if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                        flush_detail(&ui, item);
-                    }
-                    save_data(&d);
-                    ui.set_items(to_slint_items(&d, &coll_id, &search.borrow()));
-                }
-                // Reload detail from saved item so view mode shows current data
-                let d = data.borrow();
-                if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                    load_detail(&ui, item);
-                }
-                ui.set_is_editing(false);
-                set_status(&ui, "Saved");
-            } else {
-                ui.set_is_editing(true);
-                ui.set_status_message("".into());
-            }
-        });
-    }
-
-    // ── count-words (live word counter for the field editor) ──────────────────
-    {
-        let ui_w = weak!();
-        ui.on_count_words(move |text| {
-            let ui = ui_w.unwrap();
-            let n = text.split_whitespace().count() as i32;
-            ui.set_field_editor_wordcount(n);
-        });
-    }
-
-    // ── field-changed ─────────────────────────────────────────────────────────
-    // Inline name/desc edits persist on Save via flush_detail. The field-editor
-    // modal calls this with "desc" to persist + refresh immediately.
-    {
-        let (ui_w, data, sel_item, sel_coll, search) =
-            (weak!(), data.clone(), sel_item.clone(), sel_coll.clone(), search.clone());
-        ui.on_field_changed(move |which, value| {
-            if which != "desc" { return; }
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            let value = truncate_words(&value, 200);
-            {
-                let mut d = data.borrow_mut();
-                if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                    item.short_desc = value.clone();
-                }
-                save_data(&d);
-            }
-            ui.set_detail_desc(value.into());
-            let d = data.borrow();
-            ui.set_items(to_slint_items(&d, &coll_id, &search.borrow()));
-        });
-    }
-
-    // ── pick-photo ────────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_item, _sel_coll, search) =
-            (weak!(), data.clone(), sel_item.clone(), sel_coll.clone(), search.clone());
-        ui.on_pick_photo(move || {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let picked = rfd::FileDialog::new()
-                .set_title("Choose photos")
-                .add_filter("Images", &["png","jpg","jpeg","webp","gif"])
-                .pick_files();
-            if let Some(src_paths) = picked {
-                let coll_id = {
-                    let mut d = data.borrow_mut();
-                    // Preserve any unsaved edits in the text boxes before we mutate the item
-                    if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                        flush_detail(&ui, item);
-                    }
-                    let cid = d.items.iter().find(|i| i.id == item_id)
-                        .map(|i| i.collection_id.clone()).unwrap_or_default();
-                    for src_path in &src_paths {
-                        let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-                        let dest = photos_dir().join(format!("{}.{}", Uuid::new_v4(), ext));
-                        if std::fs::copy(src_path, &dest).is_ok() {
-                            let path_str = dest.to_string_lossy().to_string();
-                            generate_thumbnail(&path_str);
-                            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                                item.photos.push(path_str);
-                            }
-                        }
-                    }
-                    save_data(&d);
-                    cid
-                };
-                // Refresh only the photo views — NOT the text boxes (preserve edits)
-                let d = data.borrow();
-                if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                    ui.set_detail_has_photo(item.primary_photo().is_some());
-                    if let Some(p) = item.primary_photo() {
-                        ui.set_detail_photo(thumbnail_image(p));
-                    }
-                    ui.set_detail_photos(to_slint_photos(item));
-                }
-                ui.set_items(to_slint_items(&d, &coll_id, &search.borrow()));
-                ui.set_status_message("".into());
-            }
-        });
-    }
-
-    // ── remove-photo (by index in the item's photos list) ─────────────────────
-    {
-        let (ui_w, data, sel_item, sel_coll, search) =
-            (weak!(), data.clone(), sel_item.clone(), sel_coll.clone(), search.clone());
-        ui.on_remove_photo(move |idx| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            {
-                let mut d = data.borrow_mut();
-                if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                    let i = idx as usize;
-                    if i < item.photos.len() {
-                        let removed = item.photos.remove(i);
-                        delete_photo_files(&removed);
-                    }
-                }
-                save_data(&d);
-            }
-            let d = data.borrow();
-            if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                load_detail(&ui, item);
-            }
-            ui.set_items(to_slint_items(&d, &coll_id, &search.borrow()));
-        });
-    }
-
-    // ── set-main-photo (move chosen photo to front; preserves rest order) ─────
-    {
-        let (ui_w, data, sel_item, sel_coll, search) =
-            (weak!(), data.clone(), sel_item.clone(), sel_coll.clone(), search.clone());
-        ui.on_set_main_photo(move |idx| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            {
-                let mut d = data.borrow_mut();
-                if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                    let i = idx as usize;
-                    if i < item.photos.len() && i != 0 {
-                        let chosen = item.photos.remove(i);
-                        item.photos.insert(0, chosen);
-                    }
-                }
-                save_data(&d);
-            }
-            let d = data.borrow();
-            if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                load_detail(&ui, item);
-            }
-            ui.set_items(to_slint_items(&d, &coll_id, &search.borrow()));
-        });
-    }
-
-    // ── lightbox-load (load full-res photo at index into lightbox-photo) ──────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_lightbox_load(move |idx| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let d = data.borrow();
-            if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                if let Some(p) = item.photos.get(idx as usize) {
-                    if let Some(img) = load_slint_image(p) {
-                        ui.set_lightbox_photo(img);
-                    }
-                }
-            }
-        });
-    }
-
-    // ── add-custom-field ──────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_add_custom_field(move || {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                item.custom_fields.push(CustomField {
-                    id: Uuid::new_v4().to_string(),
-                    label: "NEW FIELD".into(),
-                    value: "".into(),
-                });
-                let fields = to_slint_fields(item);
-                save_data(&d);
-                ui.set_detail_fields(fields);
-            }
-        });
-    }
-
-    // ── delete-custom-field ───────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_delete_custom_field(move |field_id| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                item.custom_fields.retain(|f| f.id != field_id.as_str());
-                let fields = to_slint_fields(item);
-                save_data(&d);
-                ui.set_detail_fields(fields);
-            }
-        });
-    }
-
-
-
-    // ── custom-field-label-changed ────────────────────────────────────────────
-    // NOTE: We do NOT uppercase here to allow free typing. Uppercasing on every
-    // keystroke caused the one-letter-at-a-time bug by triggering a model update
-    // that reset focus. The label is stored as typed.
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_custom_field_label_changed(move |field_id, new_label| {
-            let _ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                if let Some(field) = item.custom_fields.iter_mut().find(|f| f.id == field_id.as_str()) {
-                    field.label = new_label.to_string();
-                }
-                // Do NOT call set_detail_fields here — that resets TextInput focus
-                save_data(&d);
-            }
-        });
-    }
-
-    // ── custom-field-value-changed ────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_custom_field_value_changed(move |field_id, new_value| {
-            let _ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                if let Some(field) = item.custom_fields.iter_mut().find(|f| f.id == field_id.as_str()) {
-                    field.value = truncate_words(&new_value, 200);
-                }
-                save_data(&d);
-                // NOTE: do NOT rebuild detail-fields here — this fires on every
-                // inline keystroke, and rebuilding the model would destroy the
-                // TextInput being typed in (focus loss). The inline box already
-                // shows the typed text. The modal save uses a separate callback
-                // (custom-field-value-set) that does refresh.
-            }
-        });
-    }
-
-    // ── custom-field-value-set (modal "Enlarge" save: persist + refresh) ───────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_custom_field_value_set(move |field_id, new_value| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                if let Some(field) = item.custom_fields.iter_mut().find(|f| f.id == field_id.as_str()) {
-                    field.value = truncate_words(&new_value, 200);
-                }
-                save_data(&d);
-                if let Some(item) = d.items.iter().find(|i| i.id == item_id) {
-                    ui.set_detail_fields(to_slint_fields(item));
-                }
-            }
-        });
-    }
-
-    // ── save-template-named ───────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_save_template_named(move |name| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            let labels: Vec<String> = d.items.iter()
-                .find(|i| i.id == item_id)
-                .map(|i| i.custom_fields.iter().map(|f| f.label.clone()).collect())
-                .unwrap_or_default();
-            if labels.is_empty() { return; }
-            let tname = if name.trim().is_empty() {
-                format!("Template {}", d.templates.len() + 1)
-            } else { name.to_string() };
-            d.templates.push(Template { id: Uuid::new_v4().to_string(), name: tname, field_labels: labels });
-            save_data(&d);
-            ui.set_templates(to_slint_templates(&d));
-            set_status(&ui, "Saved template");
-        });
-    }
-
-    // ── rename-collection ─────────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_rename_collection(move |idx, new_name| {
-            let ui = ui_w.unwrap();
-            if new_name.trim().is_empty() { return; }
-            let mut d = data.borrow_mut();
-            if let Some(c) = d.collections.get_mut(idx as usize) {
-                c.name = new_name.to_string();
-            }
-            let n = d.collections.len();
-            save_data(&d);
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_coll_checked(bool_model(n));
-            ui.set_coll_multi_mode(false);
-        });
-    }
-
-    // ── rename-item ───────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_rename_item(move |idx, new_name| {
-            let ui = ui_w.unwrap();
-            if new_name.trim().is_empty() { return; }
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            let target_id = {
-                let d = data.borrow();
-                filtered_items(&d, &coll_id, &search.borrow())
-                    .get(idx as usize).map(|i| i.id.clone())
-            };
-            if let Some(id) = target_id {
-                {
-                    let mut d = data.borrow_mut();
-                    if let Some(item) = d.items.iter_mut().find(|i| i.id == id) {
-                        item.name = new_name.to_string();
-                    }
-                    save_data(&d);
-                }
-                let d = data.borrow();
-                let items = to_slint_items(&d, &coll_id, &search.borrow());
-                let n = items.row_count();
-                ui.set_items(items);
-                ui.set_item_checked(bool_model(n));
-                ui.set_item_multi_mode(false);
-                if sel_item.borrow().as_deref() == Some(id.as_str()) {
-                    ui.set_detail_name(new_name.clone());
-                }
-            }
-        });
-    }
-
-    // ── apply-template (replaces current custom fields) ───────────────────────
-    {
-        let (ui_w, data, sel_item) = (weak!(), data.clone(), sel_item.clone());
-        ui.on_apply_template(move |tmpl_id| {
-            let ui = ui_w.unwrap();
-            let item_id = sel_item.borrow().clone().unwrap_or_default();
-            if item_id.is_empty() { return; }
-            let mut d = data.borrow_mut();
-            let labels: Vec<String> = d.templates.iter()
-                .find(|t| t.id == tmpl_id.as_str())
-                .map(|t| t.field_labels.clone())
-                .unwrap_or_default();
-            if let Some(item) = d.items.iter_mut().find(|i| i.id == item_id) {
-                // Replace current fields with the template's fields
-                item.custom_fields.clear();
-                for label in labels {
-                    item.custom_fields.push(CustomField {
-                        id: Uuid::new_v4().to_string(), label, value: "".into(),
-                    });
-                }
-                let fields = to_slint_fields(item);
-                save_data(&d);
-                ui.set_detail_fields(fields);
-                set_status(&ui, "Loaded template");
-            }
-        });
-    }
-
-    // ── delete-template ───────────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_delete_template(move |tmpl_id| {
-            let ui = ui_w.unwrap();
-            let mut d = data.borrow_mut();
-            d.templates.retain(|t| t.id != tmpl_id.as_str());
-            save_data(&d);
-            ui.set_templates(to_slint_templates(&d));
-        });
-    }
-
-    // ── rename-template ───────────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_rename_template(move |tmpl_id, new_name| {
-            let ui = ui_w.unwrap();
-            let mut d = data.borrow_mut();
-            if let Some(t) = d.templates.iter_mut().find(|t| t.id == tmpl_id.as_str()) {
-                t.name = new_name.to_string();
-            }
-            save_data(&d);
-            ui.set_templates(to_slint_templates(&d));
-        });
-    }
-
-
-
-    // ── search-changed ────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item, search) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone(), search.clone());
-        ui.on_search_changed(move |q| {
-            let ui = ui_w.unwrap();
-            *search.borrow_mut() = q.to_string();
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if coll_id.is_empty() { return; }
-            let d = data.borrow();
-            let items = to_slint_items(&d, &coll_id, &q);
-            let n = items.row_count();
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            *sel_item.borrow_mut() = None;
-            ui.set_selected_item(-1);
-            clear_detail(&ui);
-        });
-    }
-
-    // ── search-collections (filter left panel by name; indices stay stable) ───
-    {
-        let (ui_w, data, coll_search) = (weak!(), data.clone(), coll_search.clone());
-        ui.on_search_collections(move |q| {
-            let ui = ui_w.unwrap();
-            *coll_search.borrow_mut() = q.to_string();
-            let d = data.borrow();
-            ui.set_collections(collections_model(&d, &q));
-        });
-    }
-
-    // ── set-coll-sort ─────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, cfg, coll_search, sel_coll, anchor_coll) =
-            (weak!(), data.clone(), cfg.clone(), coll_search.clone(), sel_coll.clone(), anchor_coll.clone());
-        ui.on_set_coll_sort(move |mode| {
-            let ui = ui_w.unwrap();
-            set_coll_sort(mode);
-            { let mut s = cfg.borrow_mut(); s.coll_sort = mode; save_settings(&s); }
-            let sel_id = sel_coll.borrow().clone();
-            let mut d = data.borrow_mut();
-            sort_collections(&mut d, mode);
-            ui.set_collections(collections_model(&d, &coll_search.borrow()));
-            ui.set_coll_checked(bool_model(d.collections.len()));
-            if let Some(id) = sel_id {
-                if let Some(pos) = d.collections.iter().position(|c| c.id == id) {
-                    ui.set_selected_collection(pos as i32);
-                    *anchor_coll.borrow_mut() = Some(pos);  // anchor follows the selected collection
-                } else {
-                    ui.set_selected_collection(-1);
-                    *anchor_coll.borrow_mut() = None;
-                }
-            } else {
-                *anchor_coll.borrow_mut() = None;
-            }
-            ui.set_coll_multi_mode(false);
-        });
-    }
-
-    // ── set-item-sort ─────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, cfg, sel_coll, sel_item, search, anchor_item) =
-            (weak!(), data.clone(), cfg.clone(), sel_coll.clone(), sel_item.clone(), search.clone(), anchor_item.clone());
-        ui.on_set_item_sort(move |mode| {
-            let ui = ui_w.unwrap();
-            set_item_sort(mode);
-            { let mut s = cfg.borrow_mut(); s.item_sort = mode; save_settings(&s); }
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            if coll_id.is_empty() { return; }
-            let sel_id = sel_item.borrow().clone();
-            let d = data.borrow();
-            let items = to_slint_items(&d, &coll_id, &search.borrow());
-            let n = items.row_count();
-            ui.set_items(items);
-            ui.set_item_checked(bool_model(n));
-            if let Some(id) = sel_id {
-                let pos = filtered_items(&d, &coll_id, &search.borrow())
-                    .iter().position(|i| i.id == id);
-                ui.set_selected_item(pos.map(|p| p as i32).unwrap_or(-1));
-                *anchor_item.borrow_mut() = pos;  // anchor follows selected item to its new position
-            } else {
-                *anchor_item.borrow_mut() = None;
-            }
-            ui.set_item_multi_mode(false);
-        });
-    }
-
-    // ── collection-icon-clicked ───────────────────────────────────────────────
-    {
-        let (ui_w, icon_target) = (weak!(), icon_target.clone());
-        ui.on_collection_icon_clicked(move |idx| {
-            let ui = ui_w.unwrap();
-            *icon_target.borrow_mut() = Some(idx as usize);
-            ui.set_show_icon_picker(true);
-        });
-    }
-
-    // ── icon-picked ───────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, icon_target) = (weak!(), data.clone(), icon_target.clone());
-        ui.on_icon_picked(move |ico| {
-            let ui = ui_w.unwrap();
-            if let Some(idx) = *icon_target.borrow() {
-                let mut d = data.borrow_mut();
-                if let Some(c) = d.collections.get_mut(idx) {
-                    c.icon = ico.to_string();
-                }
-                save_data(&d);
-                ui.set_collections(to_slint_collections(&d));
-            }
-        });
-    }
-
-
-    // ── coll-right-clicked ────────────────────────────────────────────────────
-    {
-        let (ui_w, ctx_coll_idx) = (weak!(), ctx_coll_idx.clone());
-        ui.on_coll_right_clicked(move |idx, mx, my| {
-            let ui = ui_w.unwrap();
-            *ctx_coll_idx.borrow_mut() = Some(idx as usize);
-            ui.set_ctx_target(idx);
-            ui.set_ctx_is_collection(true);
-            let cnt = ui.get_coll_checked().iter().filter(|c| c.checked).count();
-            ui.set_ctx_multi(cnt >= 2);
-            ui.set_ctx_x(mx);
-            ui.set_ctx_y(my);
-            ui.set_show_context_menu(true);
-        });
-    }
-
-    // ── item-right-clicked ────────────────────────────────────────────────────
-    {
-        let (ui_w, ctx_item_idx) = (weak!(), ctx_item_idx.clone());
-        ui.on_item_right_clicked(move |idx, mx, my| {
-            let ui = ui_w.unwrap();
-            *ctx_item_idx.borrow_mut() = Some(idx as usize);
-            ui.set_ctx_target(idx);
-            ui.set_ctx_is_collection(false);
-            let cnt = ui.get_item_checked().iter().filter(|c| c.checked).count();
-            ui.set_ctx_multi(cnt >= 2);
-            ui.set_ctx_x(mx);
-            ui.set_ctx_y(my);
-            ui.set_show_context_menu(true);
-        });
-    }
-
-    // ── delete-selected-collections ───────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone());
-        ui.on_delete_selected_collections(move || {
-            let ui = ui_w.unwrap();
-            let checked = ui.get_coll_checked();
-            let mut d = data.borrow_mut();
-            let to_delete: Vec<String> = (0..checked.row_count())
-                .filter(|i| checked.row_data(*i).map(|c| c.checked).unwrap_or(false))
-                .filter_map(|i| d.collections.get(i).map(|c| c.id.clone()))
-                .collect();
-            // Delete photos of items in those collections
-            for cid in &to_delete {
-                for item in d.items.iter().filter(|i| &i.collection_id == cid) {
-                    for p in &item.photos { delete_photo_files(p); }
-                }
-            }
-            d.items.retain(|i| !to_delete.contains(&i.collection_id));
-            d.collections.retain(|c| !to_delete.contains(&c.id));
-            save_data(&d);
-            *sel_coll.borrow_mut() = None;
-            *sel_item.borrow_mut() = None;
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_coll_checked(bool_model(d.collections.len()));
-            ui.set_items(slint::ModelRc::new(slint::VecModel::from(vec![])));
-            ui.set_item_checked(bool_model(0));
-            ui.set_selected_collection(-1);
-            ui.set_selected_item(-1);
-            ui.set_coll_multi_mode(false);
-            clear_detail(&ui);
-            ui.set_status_message("".into());
-        });
-    }
-
-    // ── duplicate-selected-collections ────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_duplicate_selected_collections(move || {
-            let ui = ui_w.unwrap();
-            let checked = ui.get_coll_checked();
-            let mut d = data.borrow_mut();
-            let sel_ids: Vec<String> = (0..checked.row_count())
-                .filter(|i| checked.row_data(*i).map(|c| c.checked).unwrap_or(false))
-                .filter_map(|i| d.collections.get(i).map(|c| c.id.clone()))
-                .collect();
-            for cid in sel_ids {
-                if let Some(src) = d.collections.iter().find(|c| c.id == cid).cloned() {
-                    let new_id = Uuid::new_v4().to_string();
-                    let pos = d.collections.iter().position(|c| c.id == cid).unwrap_or(d.collections.len()-1);
-                    d.collections.insert(pos + 1, Collection {
-                        id: new_id.clone(),
-                        name: format!("{} (copy)", src.name),
-                        icon: src.icon.clone(),
-                    });
-                    let src_items: Vec<Item> = d.items.iter().filter(|i| i.collection_id == cid).cloned().collect();
-                    for mut it in src_items {
-                        it.id = Uuid::new_v4().to_string();
-                        it.collection_id = new_id.clone();
-                        it.photos = it.photos.iter().filter_map(|p| copy_photo_file(p)).collect();
-                        it.custom_fields = it.custom_fields.into_iter().map(|mut f| { f.id = Uuid::new_v4().to_string(); f }).collect();
-                        d.items.push(it);
-                    }
-                }
-            }
-            save_data(&d);
-            ui.set_collections(to_slint_collections(&d));
-            ui.set_coll_checked(bool_model(d.collections.len()));
-            ui.set_coll_multi_mode(false);
-            ui.set_status_message("".into());
-        });
-    }
-
-    // ── clear-selection (button + Esc) ────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll) = (weak!(), data.clone(), sel_coll.clone());
-        ui.on_clear_selection(move || {
-            let ui = ui_w.unwrap();
-            let d = data.borrow();
-            ui.set_coll_checked(bool_model(d.collections.len()));
-            let coll_id = sel_coll.borrow().clone().unwrap_or_default();
-            let n = d.items.iter().filter(|i| i.collection_id == coll_id).count();
-            ui.set_item_checked(bool_model(n));
-            ui.set_coll_multi_mode(false);
-            ui.set_item_multi_mode(false);
-        });
-    }
-
-    // ── toggle-coll-check ─────────────────────────────────────────────────────
-    {
-        let ui_w = weak!();
-        ui.on_toggle_coll_check(move |idx| {
-            let ui = ui_w.unwrap();
-            let checked = ui.get_coll_checked();
-            if let Some(row) = checked.row_data(idx as usize) {
-                checked.set_row_data(idx as usize, CheckedItem { checked: !row.checked });
-            }
-        });
-    }
-
-    // ── toggle-item-check ─────────────────────────────────────────────────────
-    {
-        let ui_w = weak!();
-        ui.on_toggle_item_check(move |idx| {
-            let ui = ui_w.unwrap();
-            let checked = ui.get_item_checked();
-            if let Some(row) = checked.row_data(idx as usize) {
-                checked.set_row_data(idx as usize, CheckedItem { checked: !row.checked });
-            }
-        });
-    }
-
-    // ── Panel resize ──────────────────────────────────────────────────────────
-    {
-        let cfg = cfg.clone();
-        ui.on_resize_left(move |w| {
-            cfg.borrow_mut().left_panel_width = w;
-            let s = cfg.borrow().clone();
-            save_settings(&s);
-        });
-    }
-    {
-        let cfg = cfg.clone();
-        ui.on_resize_mid(move |w| {
-            cfg.borrow_mut().mid_panel_width = w;
-            let s = cfg.borrow().clone();
-            save_settings(&s);
-        });
-    }
-
-    // ── Toggle dark/light ─────────────────────────────────────────────────────
-    {
-        let (ui_w, cfg) = (weak!(), cfg.clone());
-        ui.on_toggle_dark_mode(move || {
-            let ui = ui_w.unwrap();
-            let mut s = cfg.borrow_mut();
-            s.dark_mode = !s.dark_mode;
-            let (dark, accent) = (s.dark_mode, s.accent_hex.clone());
-            apply_theme(&ui, dark, &accent);
-            save_settings(&s);
-        });
-    }
-
-    // ── Set accent ────────────────────────────────────────────────────────────
-    {
-        let (ui_w, cfg) = (weak!(), cfg.clone());
-        ui.on_set_accent(move |c| {
-            let ui = ui_w.unwrap();
-            let mut s = cfg.borrow_mut();
-            s.accent_hex = color_to_hex(c);
-            let (dark, accent) = (s.dark_mode, s.accent_hex.clone());
-            apply_theme(&ui, dark, &accent);
-            save_settings(&s);
-        });
-    }
-
-    // ── Set font size ─────────────────────────────────────────────────────────
-    {
-        let (ui_w, cfg) = (weak!(), cfg.clone());
-        ui.on_set_font_size(move |size| {
-            let ui = ui_w.unwrap();
-            ui.global::<Theme>().set_ui_font_size(size);
-            let mut s = cfg.borrow_mut();
-            s.font_size = size;
-            save_settings(&s);
-        });
-    }
-
-    // ── Export ────────────────────────────────────────────────────────────────
-    {
-        let (ui_w, data) = (weak!(), data.clone());
-        ui.on_export_data(move || {
-            let ui = ui_w.unwrap();
-            let default = dirs::document_dir()
-                .or_else(|| dirs::home_dir())
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("Collectors-Notebook-export.json");
-            let path = rfd::FileDialog::new()
-                .set_title("Export collection data")
-                .set_file_name("Collectors-Notebook-export.json")
-                .add_filter("JSON", &["json"])
-                .save_file()
-                .unwrap_or(default);
-            let d = data.borrow();
-            match serde_json::to_string_pretty(&*d) {
-                Ok(json) => match std::fs::write(&path, json) {
-                    Ok(_)  => ui.set_status_message("".into()),
-                    Err(e) => set_status(&ui, format!("Export failed: {e}")),
-                },
-                Err(e) => set_status(&ui, format!("Serialise error: {e}")),
-            }
-        });
-    }
-
-    // ── Import ────────────────────────────────────────────────────────────────
-    {
-        let (ui_w, data, sel_coll, sel_item) =
-            (weak!(), data.clone(), sel_coll.clone(), sel_item.clone());
-        ui.on_import_data(move || {
-            let ui = ui_w.unwrap();
-            let picked = rfd::FileDialog::new()
-                .set_title("Import collection data")
-                .add_filter("JSON", &["json"])
-                .pick_file();
-            let path = match picked {
-                Some(p) => p,
-                None => { ui.set_status_message("".into()); return; }
-            };
-            match std::fs::read_to_string(&path) {
-                Ok(contents) => match serde_json::from_str::<AppData>(&contents) {
-                    Ok(imported) => {
-                        let mut d = data.borrow_mut();
-                        let ex_colls: std::collections::HashSet<_> =
-                            d.collections.iter().map(|c| c.id.clone()).collect();
-                        let ex_items: std::collections::HashSet<_> =
-                            d.items.iter().map(|i| i.id.clone()).collect();
-                        // (counts not shown; status bar removed)
-                        for c in imported.collections { if !ex_colls.contains(&c.id) { d.collections.push(c); } }
-                        for i in imported.items       { if !ex_items.contains(&i.id) { d.items.push(i); } }
-                        save_data(&d);
-                        *sel_coll.borrow_mut() = None;
-                        *sel_item.borrow_mut() = None;
-                        ui.set_collections(to_slint_collections(&d));
-                        ui.set_coll_checked(bool_model(d.collections.len()));
-                        ui.set_items(slint::ModelRc::new(slint::VecModel::from(vec![])));
-                        ui.set_item_checked(bool_model(0));
-                        ui.set_selected_collection(-1);
-                        ui.set_selected_item(-1);
-                        clear_detail(&ui);
-                        ui.set_status_message("".into());
-                    }
-                    Err(e) => set_status(&ui, format!("Parse error: {e}")),
-                },
-                Err(e) => set_status(&ui, format!("Could not read: {e}")),
-            }
-        });
-    }
-
-    // ── Open data folder ──────────────────────────────────────────────────────
-    {
-        let ui_w = weak!();
-        ui.on_open_data_folder(move || {
-            let ui = ui_w.unwrap();
-            let dir = app_dir();
-            // Use Windows Explorer / macOS Finder / xdg-open
-            #[cfg(target_os = "windows")]
-            std::process::Command::new("explorer").arg(&dir).spawn().ok();
-            #[cfg(target_os = "macos")]
-            std::process::Command::new("open").arg(&dir).spawn().ok();
-            #[cfg(target_os = "linux")]
-            std::process::Command::new("xdg-open").arg(&dir).spawn().ok();
-            ui.set_status_message("".into());
-        });
-    }
-
-    ui.run().expect("Event loop failed");
-}
+include!("update.rs");
+include!("view.rs");
