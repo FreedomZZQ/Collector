@@ -13,8 +13,6 @@ I was looking for such a program and found none that either works or look modern
 
 The traveler's notebook is basically a piece of leather wrapped around papers. The papers (called "inserts") are held by a ribbon or rubber band that loops along the spine (fold) of the leather. The inserts can come in different styles, such as lined, dotted, grids, calendars, or blank, to suit different needs. Like the traveler's notebooks, Collector's Notebook is also versatile, in that you can catalogue not just your various collections, but also, I don't know, food in pantry or fridge, shops you've been into, cities traveled to, festivals, contacts, pet vet visits, books, music, gas refill dates, enemies, teeth for the tooth fairy, ex's you went through, etc.
 
-Just don't use it as a diary. It has a 200 word limit for each field.
-
 ---
 
 <p align="center">
@@ -134,5 +132,3 @@ cargo bundle --release   # → target/release/bundle/osx/Collector.app
     + The UI is easy enough to navigate without much dictionary look-ups. The field labels can be renamed into other languages. The only problem is I've encountered Chinese, Japanese, and Korean rendering, which will be packaged on a per-case basis.
 - Migration to SQLite or other database structure vs JSON.
     + For a personal collection software (mainly for my own use), JSON works fine. Unless you own a museum with 1000+ articles, or you have... a problem (in which case you need a doctor, not a program)
-- Scrollable fields and remove field word limit
-    + Sorry I tried. Claude was able to write a scroll bar but texts don't scroll with it, and I'm too dumb to know how to fix it
