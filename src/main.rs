@@ -117,6 +117,7 @@ enum Overlay {
     NameInput,                  // rename coll/item or save-template
     ContextMenu,                // collection or item, see ctx fields
     Enlarge,                    // big editable view of one detail field
+    DataRecovered,              // startup notice: prior data.json was corrupt
 }
 
 // Which detail editor the Enlarge overlay is editing.
@@ -199,6 +200,9 @@ struct App {
     is_editing: bool,
     editors: DetailEditors,
     status: String,
+    // Set at startup if data.json existed but couldn't be parsed; the recovery
+    // overlay shows the user where the salvageable backup copy was written.
+    corrupt_backup: Option<std::path::PathBuf>,
 
     overlay: Overlay,
     icon_target: Option<usize>,
@@ -363,13 +367,21 @@ enum Message {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let mut data = load_data();
+        let (mut data, corrupt_backup) = load_data_reporting();
         let settings = load_settings();
         sort_collections(&mut data, settings.coll_sort);
         let palette = build_palette(settings.dark_mode, &settings.accent_hex);
         let coll_checked = vec![false; data.collections.len()];
 
         let panes = build_panes(&settings);
+
+        // If the previous data file was corrupt, greet the user with a notice
+        // rather than letting them assume their collection silently vanished.
+        let overlay = if corrupt_backup.is_some() {
+            Overlay::DataRecovered
+        } else {
+            Overlay::None
+        };
 
         let app = Self {
             coll_checked,
@@ -389,7 +401,8 @@ impl App {
             is_editing: false,
             editors: DetailEditors::empty(),
             status: String::new(),
-            overlay: Overlay::None,
+            corrupt_backup,
+            overlay,
             icon_target: None,
             name_value: EdContent::new(),
             name_title: String::new(),

@@ -249,6 +249,7 @@ impl App {
             Overlay::NameInput => opaque(self.name_input_overlay()),
             Overlay::ContextMenu => self.context_menu_overlay(),
             Overlay::Enlarge => opaque(self.enlarge_overlay()),
+            Overlay::DataRecovered => opaque(self.data_recovered_overlay()),
         };
         stack![base, layer].into()
     }
@@ -1379,6 +1380,32 @@ impl App {
         ].into()
     }
 
+    fn data_recovered_overlay(&self) -> Element<'_, Message> {
+        // Shown once at startup when the previous data.json couldn't be parsed.
+        // The point is to prevent the user concluding their collection vanished:
+        // explain what happened and where the salvageable copy is.
+        let path_line: Element<'_, Message> = match &self.corrupt_backup {
+            Some(p) => self.muted(p.display().to_string()).into(),
+            None => self.muted("a backup copy was saved next to your data file").into(),
+        };
+        let content = column![
+            self.heading("Couldn't read your saved data", self.fs() + 2.0),
+            self.body(
+                "Your previous data file existed but couldn't be opened, so it may \
+                 have been corrupted. To avoid overwriting it, a copy was preserved \
+                 and the app started with an empty collection."
+            ),
+            self.body("The preserved copy is here:"),
+            path_line,
+            self.muted(
+                "If you can fix or restore that file, replace your data file with it \
+                 and restart. Until then, new changes will be saved fresh."
+            ),
+            row![hspace(Fill), self.dialog_btn("Got it", true, Message::CloseOverlay)],
+        ].spacing(12);
+        self.scrim(self.modal_card_fit(content.into(), 460.0))
+    }
+
     fn name_input_overlay(&self) -> Element<'_, Message> {
         let content = column![
             self.body(self.name_title.clone()),
@@ -1492,16 +1519,16 @@ impl App {
         ).width(Fill).height(Fill);
 
         // A transparent full-area backdrop sits BEHIND the positioned card and
-        // closes the menu on a LEFT click that doesn't land on the card. The
-        // backdrop intentionally does NOT capture right-press: a right-click
-        // while the menu is open must pass through to the row beneath so that
-        // row's on_right_press reopens the menu at the new target in a single
-        // message. (Capturing right-press here raced the row's handler and could
-        // leave the menu closed depending on event order.) Esc and selecting a
-        // row dismiss it too.
+        // closes the menu on any click that doesn't land on the card — including
+        // clicks on panel buttons and empty space. Because the positioned layer
+        // is mostly empty (only the small card is interactive), backdrop clicks
+        // outside the card reach the backdrop and dismiss the menu. Right-press
+        // also closes it; each row's on_right_press then reopens the menu at the
+        // new target. Esc and selecting a row dismiss it too.
         stack![
             mouse_area(container(boxspace(Fill, Fill)))
-                .on_press(Message::CloseOverlay),
+                .on_press(Message::CloseOverlay)
+                .on_right_press(Message::CloseOverlay),
             positioned,
         ].into()
     }

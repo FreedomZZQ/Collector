@@ -185,9 +185,31 @@ pub fn settings_path() -> PathBuf { let mut p = app_dir(); p.push("settings.json
 // ─── Persistence ────────────────────────────────────────────────────────────
 
 pub fn load_data() -> AppData {
-    let mut data: AppData = std::fs::read_to_string(data_path()).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    load_data_reporting().0
+}
+
+/// Like `load_data`, but also reports the path of a corrupt-data backup if one
+/// was created on this load (so the UI can tell the user their previous data
+/// couldn't be read and where the salvageable copy lives). `None` means the
+/// data loaded cleanly or there was simply no file yet.
+pub fn load_data_reporting() -> (AppData, Option<PathBuf>) {
+    // Distinguish "no file yet" (legitimately empty first run) from "file
+    // exists but won't parse" (corruption). In the corruption case we must NOT
+    // silently fall back to an empty dataset, because the next save_data would
+    // then overwrite the user's real (recoverable) file with nothing. Instead,
+    // preserve the bad file under a timestamped .corrupt name first.
+    let mut corrupt_backup: Option<PathBuf> = None;
+    let mut data: AppData = match std::fs::read_to_string(data_path()) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                corrupt_backup = backup_corrupt_file(&data_path());
+                AppData::default()
+            }
+        },
+        // File missing or unreadable: normal first-run / empty state.
+        Err(_) => AppData::default(),
+    };
     // Migrate any legacy absolute photo paths to bare filenames so the data and
     // photos/ folder are portable across machines and user accounts.
     for item in &mut data.items {
@@ -215,17 +237,68 @@ pub fn load_data() -> AppData {
             c.order = i as u64;
         }
     }
-    data
+    (data, corrupt_backup)
 }
 pub fn save_data(data: &AppData) {
     if let Ok(json) = serde_json::to_string_pretty(data) {
-        std::fs::write(data_path(), json).ok();
+        atomic_write(&data_path(), json.as_bytes());
     }
 }
+
+/// Write `bytes` to `path` atomically: write to a sibling temp file, flush, then
+/// rename over the destination. A crash or power loss mid-write leaves either
+/// the old file or the new file intact — never a truncated, unparseable one.
+/// (rename is atomic when source and destination are on the same filesystem,
+/// which they are here since the temp file sits in the same directory.)
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) {
+    use std::io::Write;
+    let tmp = path.with_extension("tmp");
+    // Scope the file handle so it's closed (flushed) before the rename.
+    let wrote = {
+        match std::fs::File::create(&tmp) {
+            Ok(mut f) => f.write_all(bytes).and_then(|_| f.sync_all()).is_ok(),
+            Err(_) => false,
+        }
+    };
+    if wrote {
+        // If the rename fails, drop the temp file rather than leaving litter.
+        if std::fs::rename(&tmp, path).is_err() {
+            std::fs::remove_file(&tmp).ok();
+        }
+    } else {
+        std::fs::remove_file(&tmp).ok();
+    }
+}
+
+/// Preserve an unparseable data/settings file before it can be overwritten, by
+/// copying it to "<name>.corrupt-<unix_secs>". Returns the backup path on
+/// success. Best-effort: failures yield `None` because this runs on a path
+/// that's already degraded.
+fn backup_corrupt_file(path: &std::path::Path) -> Option<PathBuf> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(format!(".corrupt-{secs}"));
+    let backup = PathBuf::from(backup);
+    std::fs::copy(path, &backup).ok().map(|_| backup)
+}
+
 pub fn load_settings() -> Settings {
-    let mut s: Settings = std::fs::read_to_string(settings_path()).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    // Settings corruption is far less costly than data corruption (the file is
+    // small and regenerable), but we still preserve a bad one rather than
+    // silently discarding it, for symmetry and easier debugging.
+    let mut s: Settings = match std::fs::read_to_string(settings_path()) {
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                backup_corrupt_file(&settings_path());
+                Settings::default()
+            }
+        },
+        Err(_) => Settings::default(),
+    };
     // Clamp pane ratios into the allowed range. This also self-heals older
     // settings.json files that stored wider ratios before the 0.4 cap existed.
     s.left_ratio = s.left_ratio.clamp(0.08, 0.33);
@@ -234,7 +307,7 @@ pub fn load_settings() -> Settings {
 }
 pub fn save_settings(s: &Settings) {
     if let Ok(json) = serde_json::to_string_pretty(s) {
-        std::fs::write(settings_path(), json).ok();
+        atomic_write(&settings_path(), json.as_bytes());
     }
 }
 
