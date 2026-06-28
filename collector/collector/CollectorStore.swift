@@ -39,16 +39,76 @@ final class CollectorStore: ObservableObject {
 
     // MARK: - JSON config
 
-    static func makeEncoder() -> JSONEncoder {
+    nonisolated static func makeEncoder() -> JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
         e.dateEncodingStrategy = .iso8601
         return e
     }
-    static func makeDecoder() -> JSONDecoder {
+    nonisolated static func makeDecoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
+    }
+
+    private struct LegacyDesktopFile: Decodable {
+        var collections: [LegacyDesktopCollection]
+        var items: [LegacyDesktopItem]
+    }
+
+    private struct LegacyDesktopCollection: Decodable {
+        var id: String
+        var name: String
+        var icon: String
+
+        private enum CodingKeys: String, CodingKey { case id, name, icon }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Untitled"
+            icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "box"
+        }
+    }
+
+    private struct LegacyDesktopItem: Decodable {
+        var id: String
+        var collectionID: String
+        var name: String
+        var shortDesc: String
+        var acquiredDate: String
+        var customFields: [LegacyDesktopField]
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name
+            case collectionID = "collection_id"
+            case shortDesc = "short_desc"
+            case acquiredDate = "acquired_date"
+            case customFields = "custom_fields"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            collectionID = try c.decodeIfPresent(String.self, forKey: .collectionID) ?? ""
+            name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+            shortDesc = try c.decodeIfPresent(String.self, forKey: .shortDesc) ?? ""
+            acquiredDate = try c.decodeIfPresent(String.self, forKey: .acquiredDate) ?? ""
+            customFields = try c.decodeIfPresent([LegacyDesktopField].self, forKey: .customFields) ?? []
+        }
+    }
+
+    private struct LegacyDesktopField: Decodable {
+        var label: String
+        var value: String
+
+        private enum CodingKeys: String, CodingKey { case label, value }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+            value = try c.decodeIfPresent(String.self, forKey: .value) ?? ""
+        }
     }
 
     // MARK: - Derived
@@ -230,9 +290,12 @@ final class CollectorStore: ObservableObject {
 
     /// Parse raw JSON into collections + trash. Accepts a full envelope
     /// (`{ collections, trash }`) or a single bare collection (`{ name, items }`).
-    static func parseImport(_ text: String) -> ParsedImport? {
+    nonisolated static func parseImport(_ text: String) -> ParsedImport? {
         guard let data = text.data(using: .utf8) else { return nil }
         let decoder = makeDecoder()
+        if let legacy = parseLegacyDesktopImport(data, decoder: decoder) {
+            return legacy
+        }
         if let env = try? decoder.decode(LibraryExport.self, from: data), !env.collections.isEmpty {
             return ParsedImport(collections: env.collections, trash: env.trash)
         }
@@ -240,6 +303,68 @@ final class CollectorStore: ObservableObject {
             return ParsedImport(collections: [single], trash: Trash())
         }
         return nil
+    }
+
+    private nonisolated static func parseLegacyDesktopImport(_ data: Data, decoder: JSONDecoder) -> ParsedImport? {
+        guard let legacy = try? decoder.decode(LegacyDesktopFile.self, from: data),
+              !legacy.collections.isEmpty
+        else { return nil }
+
+        let itemsByCollection = Dictionary(grouping: legacy.items, by: \.collectionID)
+        let collections = legacy.collections.map { c in
+            ItemCollection(
+                id: c.id,
+                name: c.name.isEmpty ? "Untitled" : c.name,
+                icon: iconNameFromDesktop(c.icon),
+                items: (itemsByCollection[c.id] ?? []).map(legacyItem)
+            )
+        }
+        return ParsedImport(collections: collections, trash: Trash())
+    }
+
+    private nonisolated static func legacyItem(_ item: LegacyDesktopItem) -> Item {
+        let tagField = item.customFields.first { $0.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "tags" }
+        let tags = tagField?.value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty } ?? []
+        var fields = item.customFields
+            .filter { $0.label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "tags" }
+            .map { Field(label: $0.label, value: $0.value, kind: inferFieldKind($0.label)) }
+        if !item.acquiredDate.isEmpty,
+           !fields.contains(where: { $0.label.localizedCaseInsensitiveContains("acquired") }) {
+            fields.insert(Field(label: "Acquired", value: item.acquiredDate, kind: .date), at: 0)
+        }
+        return Item(
+            id: item.id,
+            name: item.name,
+            images: [], // Desktop photo paths are local to that machine.
+            description: item.shortDesc,
+            tags: tags,
+            fields: fields
+        )
+    }
+
+    private nonisolated static func inferFieldKind(_ label: String) -> FieldKind {
+        let l = label.lowercased()
+        if l.contains("value") || l.contains("price") || l.contains("cost") || l.contains("worth") { return .value }
+        if l.contains("condition") || l.contains("grade") { return .condition }
+        if l.contains("acquired") || l.contains("date") || l.contains("purchased") || l.contains("year") { return .date }
+        if l.contains("note") || l.contains("comment") { return .multiline }
+        return .text
+    }
+
+    private nonisolated static func iconNameFromDesktop(_ icon: String) -> String {
+        switch icon {
+        case "headphones", "pen", "camera", "box", "coin", "tag", "image": return icon
+        case "🎧": return "headphones"
+        case "✒", "🖊", "🖋", "✏": return "pen"
+        case "📷", "📸": return "camera"
+        case "🪙", "💰", "💵": return "coin"
+        case "🏷": return "tag"
+        case "🖼", "🌄", "🌅": return "image"
+        default: return "box"
+        }
     }
 
     // MARK: - Persistence

@@ -58,6 +58,30 @@ object LibraryJson {
     private fun JSONObject.optStringOrNull(key: String): String? =
         if (has(key) && !isNull(key)) optString(key) else null
 
+    private fun iconNameFromDesktop(icon: String): String {
+        return when (icon) {
+            "headphones", "pen", "camera", "box", "coin", "tag", "image" -> icon
+            "🎧" -> "headphones"
+            "✒", "🖊", "🖋", "✏" -> "pen"
+            "📷", "📸" -> "camera"
+            "🪙", "💰", "💵" -> "coin"
+            "🏷" -> "tag"
+            "🖼", "🌄", "🌅" -> "image"
+            else -> "box"
+        }
+    }
+
+    private fun inferKind(label: String): FieldKind {
+        val l = label.lowercase(Locale.US)
+        return when {
+            l.contains("value") || l.contains("price") || l.contains("cost") || l.contains("worth") -> FieldKind.VALUE
+            l.contains("condition") || l.contains("grade") -> FieldKind.CONDITION
+            l.contains("acquired") || l.contains("date") || l.contains("purchased") || l.contains("year") -> FieldKind.DATE
+            l.contains("note") || l.contains("comment") -> FieldKind.MULTILINE
+            else -> FieldKind.TEXT
+        }
+    }
+
     // MARK: - Encode
 
     private fun fieldJson(f: Field) = JSONObject().apply {
@@ -175,6 +199,60 @@ object LibraryJson {
         } ?: emptyList(),
     )
 
+    private fun desktopFieldFrom(o: JSONObject): Field {
+        val label = o.optString("label")
+        return Field(
+            label = label,
+            value = o.optString("value"),
+            kind = FieldKind.fromWire(o.optStringOrNull("kind")).takeIf { o.has("kind") } ?: inferKind(label),
+        )
+    }
+
+    private fun desktopItemFrom(o: JSONObject): Item {
+        val rawFields = o.optJSONArray("custom_fields")?.objects() ?: emptyList()
+        val tags = rawFields
+            .firstOrNull { it.optString("label").trim().equals("tags", ignoreCase = true) }
+            ?.optString("value")
+            ?.split(",")
+            ?.map { it.trim().lowercase(Locale.US) }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
+        val fields = rawFields
+            .filterNot { it.optString("label").trim().equals("tags", ignoreCase = true) }
+            .map { desktopFieldFrom(it) }
+            .toMutableList()
+        val acquired = o.optStringOrNull("acquired_date").orEmpty()
+        val alreadyHasAcquired = fields.any { it.label.contains("acquired", ignoreCase = true) }
+        if (acquired.isNotBlank() && !alreadyHasAcquired) {
+            fields.add(0, Field(label = "Acquired", value = acquired, kind = FieldKind.DATE))
+        }
+        return Item(
+            id = o.optStringOrNull("id") ?: java.util.UUID.randomUUID().toString(),
+            name = o.optString("name"),
+            image = null, // Desktop photo paths are local to that machine.
+            description = o.optStringOrNull("short_desc") ?: o.optString("description"),
+            tags = tags,
+            fields = fields,
+        )
+    }
+
+    private fun desktopImportFrom(root: JSONObject): ParsedImport? {
+        val collectionsJson = root.optJSONArray("collections") ?: return null
+        val itemsJson = root.optJSONArray("items") ?: return null
+        val itemsByCollection = itemsJson.objects().groupBy { it.optString("collection_id") }
+        val collections = collectionsJson.objects().map { c ->
+            val id = c.optStringOrNull("id") ?: java.util.UUID.randomUUID().toString()
+            ItemCollection(
+                id = id,
+                name = c.optStringOrNull("name") ?: "Untitled",
+                icon = iconNameFromDesktop(c.optStringOrNull("icon") ?: "box"),
+                items = itemsByCollection[id]?.map { desktopItemFrom(it) } ?: emptyList(),
+            )
+        }
+        if (collections.isEmpty()) return null
+        return ParsedImport(collections, Trash())
+    }
+
     /** Decode the on-device file: `{collections, templates, trash}` or a bare `[collection,…]`. */
     fun decodeLibraryFile(text: String): LibraryFile? {
         val trimmed = text.trim()
@@ -201,6 +279,7 @@ object LibraryJson {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return null
         val root = try { JSONObject(trimmed) } catch (_: Exception) { return null }
+        desktopImportFrom(root)?.let { return it }
         if (root.has("collections")) {
             val collections = root.optJSONArray("collections")?.objects()?.map { collectionFrom(it) } ?: emptyList()
             if (collections.isEmpty()) return null
