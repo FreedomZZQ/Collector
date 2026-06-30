@@ -334,8 +334,21 @@ impl App {
                 if let Some((_, _, val)) = self.editors.fields.get_mut(i) { val.perform(a); }
                 Task::none()
             }
+            // Ctrl+S / Cmd+S: persist the in-progress edits without leaving edit
+            // mode. No-op when not editing so the shortcut is harmless elsewhere.
+            Message::SaveShortcut => {
+                if self.is_editing {
+                    self.flush_editors_to_item();
+                    self.persist();
+                    self.status = "Saved".into();
+                }
+                Task::none()
+            }
             Message::AddCustomField => {
                 if let Some(id) = self.sel_item.clone() {
+                    // Save in-progress edits first; reload_editors below would
+                    // otherwise discard any unsaved name/desc/field text.
+                    self.flush_editors_to_item();
                     if let Some(it) = self.data.items.iter_mut().find(|i| i.id == id) {
                         it.custom_fields.push(CustomField {
                             id: new_id(), label: "NEW FIELD".into(), value: String::new(),
@@ -823,6 +836,11 @@ impl App {
     // ── selection helpers ────────────────────────────────────────────────
 
     fn select_collection(&mut self, idx: usize, ctrl: bool, shift: bool) {
+        // Auto-save in-progress edits before changing collection selection.
+        if self.is_editing {
+            self.flush_editors_to_item();
+            self.persist();
+        }
         let n = self.data.collections.len();
         if n == 0 || idx >= n { return; }
         if self.coll_checked.len() != n { self.coll_checked = vec![false; n]; }
@@ -877,6 +895,13 @@ impl App {
     }
 
     fn select_item(&mut self, idx: usize, ctrl: bool, shift: bool) {
+        // Auto-save any in-progress edits before the selection changes; every
+        // branch below clears edit mode and reloads the editors, which would
+        // otherwise silently drop unsaved text.
+        if self.is_editing {
+            self.flush_editors_to_item();
+            self.persist();
+        }
         // Snapshot the current view as owned ids so we don't hold a borrow of
         // `self` across the mutations below.
         let ids: Vec<String> = self.current_items().iter().map(|i| i.id.clone()).collect();

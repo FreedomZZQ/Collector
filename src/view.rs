@@ -21,6 +21,69 @@ fn boxspace(w: impl Into<Length>, h: impl Into<Length>) -> iced::widget::Space {
     iced::widget::Space::new().width(w).height(h)
 }
 
+// ── text_editor key bindings (word ops + Tab field nav) ─────────────────────
+//
+// iced 0.14's text_editor lets us override key handling with `.key_binding()`,
+// a closure `Fn(KeyPress) -> Option<Binding<Message>>`. Returning `Some(b)`
+// runs binding `b`; returning `None` makes the key do nothing. Because a custom
+// closure *replaces* the defaults entirely, anything we don't handle explicitly
+// is forwarded to `Binding::from_key_press(kp)` so normal typing, Enter, plain
+// Backspace/Delete, arrows, copy/paste, etc. keep working.
+//
+// The "jump" modifier (`Modifiers::jump()`) is Ctrl on Windows/Linux and Option
+// on macOS — the native word-wise modifier on each platform.
+
+/// Word-wise operations shared by every editor. Returns `Some(..)` only when the
+/// jump modifier is held together with Backspace/Delete/Arrow; otherwise `None`
+/// so the caller can fall through to default handling.
+fn editor_word_binding(kp: &text_editor::KeyPress) -> Option<text_editor::Binding<Message>> {
+    use iced::keyboard::key::Named;
+    use iced::keyboard::Key;
+    use text_editor::{Binding, Motion};
+
+    let word = kp.modifiers.jump();
+    if !word {
+        return None;
+    }
+    let shift = kp.modifiers.shift();
+    let Key::Named(named) = &kp.key else {
+        return None;
+    };
+    match named {
+        // Ctrl/Option+Backspace — delete the word to the left: select it, then delete.
+        Named::Backspace => Some(Binding::Sequence(vec![
+            Binding::Select(Motion::WordLeft),
+            Binding::Backspace,
+        ])),
+        // Ctrl/Option+Delete — delete the word to the right.
+        Named::Delete => Some(Binding::Sequence(vec![
+            Binding::Select(Motion::WordRight),
+            Binding::Delete,
+        ])),
+        // Ctrl/Option+Left/Right — jump by word (extend the selection if Shift is held).
+        Named::ArrowLeft => Some(if shift {
+            Binding::Select(Motion::WordLeft)
+        } else {
+            Binding::Move(Motion::WordLeft)
+        }),
+        Named::ArrowRight => Some(if shift {
+            Binding::Select(Motion::WordRight)
+        } else {
+            Binding::Move(Motion::WordRight)
+        }),
+        _ => None,
+    }
+}
+
+/// Key bindings for modal / overlay editors: word ops only. Tab is left to the
+/// editor's default so focus can't escape the modal into hidden base widgets.
+fn editor_keys_basic(kp: text_editor::KeyPress) -> Option<text_editor::Binding<Message>> {
+    if let Some(b) = editor_word_binding(&kp) {
+        return Some(b);
+    }
+    text_editor::Binding::from_key_press(kp)
+}
+
 // ── small style/element helpers ─────────────────────────────────────────────
 
 /// Truncate a string to a single display line of roughly `max` characters,
@@ -634,6 +697,7 @@ impl App {
             ],
             text_editor(&self.editors.name)
                 .on_action(Message::NameEdited)
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs() + 1.0)
                 .padding(8)
                 // Name is a single line; it scrolls horizontally past that.
@@ -650,6 +714,7 @@ impl App {
             ],
             text_editor(&self.editors.desc)
                 .on_action(Message::DescEdited)
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs())
                 // Fixed three-line box. The editor renders at ~1.0x line height
                 // (not the 1.3 the text widget uses), so size off ~1.15x per line
@@ -760,6 +825,7 @@ impl App {
             let label_el: Element<Message> = if editing {
                 text_editor(&self.editors.fields[i].1)
                     .on_action(move |a| Message::FieldLabelEdited(i, a))
+                    .key_binding(editor_keys_basic)
                     .font(CJK).size((self.fs() - 4.0).max(9.0))
                     .padding(4)
                     .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
@@ -785,6 +851,7 @@ impl App {
             field_row = field_row.push(
                 text_editor(&self.editors.fields[i].2)
                     .on_action(move |a| Message::FieldValueEdited(i, a))
+                    .key_binding(editor_keys_basic)
                     .font(CJK).size(self.fs())
                     .min_height(self.fs() * 1.3 + 16.0)
                     .max_height(self.fs() * 1.3 * 3.0 + 16.0)
@@ -808,6 +875,7 @@ impl App {
         container(
             text_editor(content)
                 .on_action(on_action)
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs() - 1.0)
                 .padding(6)
                 .style(self.editor_style(true))
@@ -1279,6 +1347,7 @@ impl App {
                     let ed = &self.template_rename.as_ref().unwrap().1;
                     row![
                         text_editor(ed).on_action(Message::TemplateRenameEdited)
+                            .key_binding(editor_keys_basic)
                             .font(CJK).size(self.fs() - 2.0).padding(4)
                             .style(self.editor_style(true)),
                         self.small_action("OK", Message::CommitTemplateRename),
@@ -1411,6 +1480,7 @@ impl App {
             self.body(self.name_title.clone()),
             text_editor(&self.name_value)
                 .on_action(Message::NameValueEdited)
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs()).padding(8)
                 .min_height(self.fs() * 1.3 + 16.0)
                 .max_height(self.fs() * 1.3 * 3.0 + 16.0)
@@ -1450,6 +1520,7 @@ impl App {
                 .align_y(iced::Alignment::Center),
             text_editor(content)
                 .on_action(on_action)
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs())
                 .height(Fill)
                 .padding(10)
@@ -1467,6 +1538,7 @@ impl App {
                 .align_y(iced::Alignment::Center),
             text_editor(content)
                 .on_action(move |a| Message::FieldValueEdited(i, a))
+                .key_binding(editor_keys_basic)
                 .font(CJK).size(self.fs())
                 .height(Fill)
                 .padding(10)
