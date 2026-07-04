@@ -35,7 +35,7 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset_installer: Collectors-Notebook-windows-x86_64-setup.exe
+            asset_installer: Collectors-Notebook-windows-x86_64.msi
             asset_portable: Collectors-Notebook-windows-x86_64-portable.exe
           - os: macos-latest
             target: aarch64-apple-darwin        # Apple Silicon (M1+)
@@ -56,18 +56,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Cache cargo registry + build output. NOTE: target/ lives under
-      # src-tauri now, and the lockfile hashed is src-tauri/Cargo.lock.
-      - name: Cache cargo
-        uses: actions/cache@v4
+      # Rust build cache. This purpose-built action keys on the toolchain +
+      # Cargo.lock, caches the registry and target/ dir, and prunes stale
+      # artifacts on its own — far more reliable than a hand-rolled
+      # actions/cache. `workspaces` points it at where Cargo.toml lives.
+      # `key` adds the target triple so each matrix leg caches separately.
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.target }}-cargo-
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
 
       # Tauri v2 Linux stack: webview + tray/menu/rsvg support. This replaces
       # the old winit/fontconfig list entirely.
@@ -91,7 +89,14 @@ jobs:
       - name: Install tauri-cli
         run: cargo binstall tauri-cli --locked --no-confirm
 
-      - name: Build bundles
+      # Windows: WiX MSI instead of NSIS (NSIS 3.11 breaks Tauri's installer
+      # template with the "NSISCOMCALL requires 4 parameters, passed 7" error).
+      - name: Build bundles (Windows / MSI)
+        if: runner.os == 'Windows'
+        run: cargo tauri build --target ${{ matrix.target }} --bundles msi
+
+      - name: Build bundles (macOS / Linux)
+        if: runner.os != 'Windows'
         run: cargo tauri build --target ${{ matrix.target }}
 
       # -- Stage: rename Tauri's versioned bundle names to stable asset names --
@@ -113,7 +118,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe" "dist/${{ matrix.asset_installer }}"
+          Copy-Item "src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi" "dist/${{ matrix.asset_installer }}"
           Copy-Item "src-tauri/target/${{ matrix.target }}/release/collectors-notebook.exe" "dist/${{ matrix.asset_portable }}"
 
       - name: Upload build artifact
