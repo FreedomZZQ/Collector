@@ -1,5 +1,12 @@
 name: Build
 # Build Tauri bundles for Windows, macOS, and Linux.
+#
+# Triggers:
+#   - push to main / PR: builds all (CI check)
+#   - push a version tag v*: builds all AND attaches bundles to a Release
+#
+# Prereq committed to the repo: src-tauri/icons/ (run `cargo tauri icon` once
+# locally and commit) — the macOS/Windows bundlers require icon.icns/.ico.
 on:
   push:
     branches: [main]
@@ -52,17 +59,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \\
-            libwebkit2gtk-4.1-dev build-essential curl wget file \\
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
+      # One command per line — no shell line-continuations, which YAML/GHA can
+      # mangle into stray backslash args (that produced binstall's
+      # "multiple packages" error).
       - name: Install tauri-cli
         run: |
-          cargo binstall tauri-cli --version "^2" --locked --no-confirm \\
-            || cargo install tauri-cli --version "^2" --locked
+          cargo binstall tauri-cli --version "^2" --locked --no-confirm || cargo install tauri-cli --version "^2" --locked
           cargo tauri --version
 
       - name: Build bundles (Windows / MSI)
@@ -86,11 +93,9 @@ jobs:
           mkdir -p dist
           cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg "dist/${{ matrix.asset }}"
 
-      # The MSI is named "Collector's Notebook_3.0.0_x64_en-US.msi" — the
-      # apostrophe broke the previous glob copy silently, so nothing landed in
-      # dist/ and the release had no Windows asset. Resolve the file via
-      # Get-ChildItem (handles the apostrophe as data, not a quote) and FAIL
-      # LOUDLY if it isn't found instead of uploading nothing.
+      # The MSI filename contains an apostrophe ("Collector's Notebook_..."),
+      # which broke a glob copy silently. Resolve via -LiteralPath and fail
+      # loudly if nothing is found, so a silent miss can't pass as success.
       - name: Stage (Windows installer + portable exe)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -102,7 +107,7 @@ jobs:
           $exe = "src-tauri/target/${{ matrix.target }}/release/collectors-notebook.exe"
           if (-not (Test-Path -LiteralPath $exe)) { Write-Error "Portable exe missing"; exit 1 }
           Copy-Item -LiteralPath $exe -Destination "dist/${{ matrix.asset_portable }}"
-          Get-ChildItem dist   # log what we staged
+          Get-ChildItem dist
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
