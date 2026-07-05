@@ -9,7 +9,7 @@
 
 A lightweight, native desktop app for cataloguing personal collections.
 
-I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8) to built it in **Rust + Slint**. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo.
+I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8 and Fable 5) to built it in **Rust + Slint**. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo.
 
 The traveler's notebook is basically a piece of leather wrapped around papers. The papers (called "inserts") are held by a ribbon or rubber band that loops along the spine (fold) of the leather. The inserts can come in different styles, such as lined, dotted, grids, calendars, or blank, to suit different needs. Like the traveler's notebooks, Collector's Notebook is also versatile, in that you can catalogue not just your various collections, but also, I don't know, food in pantry or fridge, shops you've been into, cities traveled to, festivals, contacts, pet vet visits, books, music, gas refill dates, enemies, teeth for the tooth fairy, ex's you went through, etc.
 
@@ -42,6 +42,8 @@ v3.0 is a full migration from Iced UI to Tauri. This should bring more improveme
 - Correct textboxes and hot keys
 - Better compatibiliy across systems
 - Smaller RAM usage (~90% less with my own collection), footprint
+- Back up at every launch, and restore 5 most recent backups
+    - photos aren't saved to save time and space
 
 Hopefully everything else is preserved.
 
