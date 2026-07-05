@@ -7,9 +7,9 @@
 </p>
 <p align="center"></p>
 
-A lightweight, native desktop app for cataloguing personal collections.
+A lightweight app for cataloguing personal collections, with a Tauri desktop app and native iOS/Android companion apps.
 
-I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8) to built it in **Rust + Slint**. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo.
+I was looking for such a program and found none that either works or look modern. This is a personal project. I have little coding experience. Much as I am not an AI-hype, I asked Claude (Opus 4.8 and Fable 5) to built it in **Rust + Slint**. Later, in v2.0.0, it was migrated to Iced, and in v3.0.0, to Tauri. AI-generated software name was "Collector". I changed it to "Collector's Notebook", after "Traveler's Notebook", a journal style (and a brand) that looks just like the icon and logo.
 
 The traveler's notebook is basically a piece of leather wrapped around papers. The papers (called "inserts") are held by a ribbon or rubber band that loops along the spine (fold) of the leather. The inserts can come in different styles, such as lined, dotted, grids, calendars, or blank, to suit different needs. Like the traveler's notebooks, Collector's Notebook is also versatile, in that you can catalogue not just your various collections, but also, I don't know, food in pantry or fridge, shops you've been into, cities traveled to, festivals, contacts, pet vet visits, books, music, gas refill dates, enemies, teeth for the tooth fairy, ex's you went through, etc.
 
@@ -17,32 +17,75 @@ Just don't use it as a diary. It has a 200 word limit for each field.
 
 ---
 
+<p align="center">
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/ac358239-fe00-4789-a231-975f4e4a7659" />
+    <img height="512" alt="image" src="https://github.com/user-attachments/assets/3f1ffeef-92d9-433d-91b4-175383908902" />
+    <br>
+    <sub>Click to enlarge</sub>
+</p>
+<p align="center"></p>
+
 ## Features
 
 - Resizeable three-panel layout
+- Light and dark mode, and font size between 11-22pt
 - Customizable and renamable fields; also save all your fields as templates with names of your choice
 - Right click context menus for quick rename/duplication/deletion
 - Edit/View mode toggle, as well as inline edit panel when needed
 - Zoom images in/out 10x, and the ability to attach multiple photos to an item entry
 - Local JSON storage that you can migrate between machines with export/import
 - Simplified Chinese, Japanese, and Korean support for input texts (no UI translation)
-- Small size! Less than 30 MB depends on how you build it, and can go down to ~16 MB on Windows
+
+## New in v3.0!!!
+
+v3.0 is a full migration from Iced UI to Tauri. This should bring more improvements:
+
+- Correct textboxes and hot keys
+- Better compatibiliy across systems
+- Smaller RAM usage (~90% less with my own collection)
+- Back up at every launch, and restore 5 most recent backups
+- Incremental manual photo back up
+- Various UI adjustments and improvements
+
+Hopefully everything else is preserved.
 
 ---
 
 ## Project Structure
 
 ```
-collector/
-├── Cargo.toml
-├── build.rs
-├── assets/
-│   └── fonts            # Embeded Simplified Chinese, Japanese, and Korean font
-│   └── icons            # Hand drawn icons by yours truly
-├── src/
-│   └── main.rs          # Data model, persistence, settings, all UI callbacks
-└── ui/
-    └── main.slint       # Full UI: panels, drag handles, settings modal, theme
+collectors-notebook/
+├─ .github/
+│  └─ workflows/
+│     └─ rust.yaml            # CI: builds Win/macOS/Linux, attaches to Releases on a version tag
+├─ .gitignore
+├─ collector/                 # native iOS app (SwiftUI)
+├─ collector_android/         # native Android app (Jetpack Compose)
+├─ ui/                        # desktop frontend — embedded into the binary at build time
+│  ├─ index.html              #   app shell
+│  ├─ styles.css              #   the palette + all component styling
+│  ├─ app.js                  #   the entire UI state machine
+│  └─ fonts/                  #   bundled fonts
+│     ├─ NotoSans-Regular.ttf
+│     ├─ NotoSansCJK-Regular-subset.otf
+│     └─ NotoSansCJK-Bold-subset.otf
+└─ src-tauri/                 # desktop backend + app config
+   ├─ Cargo.toml              #   Rust dependencies
+   ├─ Cargo.lock              #   pinned versions (COMMIT THIS)
+   ├─ build.rs                #   three-line tauri-build hook
+   ├─ tauri.conf.json         #   app config: window, identifier, bundle targets, icons
+   ├─ capabilities/
+   │  └─ default.json         #   permission set granted to the window
+   ├─ icons/                  #   app icons — generated once, then committed
+   │  ├─ 32x32.png
+   │  ├─ 128x128.png
+   │  ├─ 128x128@2x.png
+   │  ├─ icon.icns            #   macOS (required by the bundler)
+   │  └─ icon.ico             #   Windows (required by the bundler)
+   └─ src/
+      ├─ main.rs              #   Tauri commands: load/save, photos, dialogs, backups
+      ├─ model.rs             #   data types, persistence, sorting, portable import/export
+      └─ image_util.rs        #   thumbnails, photo file management, base64 delivery
 ```
 
 ---
@@ -51,15 +94,44 @@ collector/
 
 ### Prerequisites
 
-- **Rust stable** — https://rustup.rs
-- **Linux extras**: `sudo apt install libxcb-shape0-dev libxkbcommon-dev libfontconfig1-dev`
-- macOS / Windows: no extras needed
+- **Rust** (stable, 1.88+): <https://rustup.rs>
+- **Tauri CLI 2.x.** Install the prebuilt binary (seconds) rather than
+  compiling it:
+  ```sh
+  cargo install cargo-binstall
+  cargo binstall tauri-cli
+  ```
+  Verify: `cargo tauri --version` prints a 2.x version.
+- **Platform toolchains:**
+  - Windows: MSVC Build Tools; WebView2 ships with Win 10/11.
+  - macOS: Xcode Command Line Tools (`xcode-select --install`).
+  - Linux: the WebKitGTK stack —
+    ```sh
+    sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+      libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    ```
 
-```bash
-cd collector
-cargo run              # development
-cargo build --release  # → target/release/collector
+### Building and Packaging
+
+`cargo tauri build` writes bundles under
+`src-tauri/target/release/bundle/`. Defaults per platform:
+
+| Platform | Output | Location |
+|---|---|---|
+| Windows | NSIS installer `*-setup.exe` (+ portable `collectors-notebook.exe` one level up) | `bundle/nsis/` |
+| macOS | `.dmg` (contains a proper `.app`) | `bundle/dmg/` |
+| Linux | `.AppImage` (self-contained) and/or `.deb` | `bundle/appimage/`, `bundle/deb/` |
+
+Pick specific formats with `--bundles`, e.g.:
+
+```sh
+cargo tauri build --bundles msi          # Windows MSI
+cargo tauri build --bundles appimage,deb # Linux: both
+cargo tauri build --bundles app,dmg      # macOS
 ```
+
+The iOS app opens from `collector/collector.xcodeproj`. The Android app opens from
+`collector_android/` in Android Studio.
 
 ---
 
@@ -80,35 +152,20 @@ Two files are written: `data.json` (collections + items) and `settings.json` (th
 Both live in **Settings → Data** and use a native file picker.
 
 **Export** writes a portable JSON envelope — `{ app, version, exportedAt, collections: [ … ] }`
-with items nested inside their collection. This is the **same shape the mobile app reads
-and writes**, so a file exported on the desktop opens directly on your phone and vice‑versa.
+with items nested inside their collection. This is the same shape the mobile apps read
+and write, so a file exported on the desktop opens directly on your phone and vice-versa.
 
 **Import** auto-detects the file and **merges** by UUID (existing items are never
 overwritten). It accepts:
 
-- the portable envelope above (from desktop **or** mobile),
+- the portable envelope above (from desktop or mobile),
 - a single exported collection, and
 - the legacy desktop `AppData` shape (older backups still import).
 
 The desktop model is "flat" (separate `collections` + `items` arrays); conversion to and
-from the nested portable shape happens in `src/main.rs` (`appdata_to_portable` /
-`portable_to_appdata`). Collection icons are mapped between emoji (desktop) and symbol
-names (mobile); item photos and field-types are handled best-effort since the two apps
-store them differently.
-
----
-
-## Packaging
-
-```bash
-# Linux AppImage / .deb
-cargo install cargo-bundle && cargo bundle --release
-
-# macOS .app
-cargo bundle --release   # → target/release/bundle/osx/Collector.app
-
-# Windows: the .exe is already standalone
-```
+from the nested portable shape happens in `src-tauri/src/model.rs`. Collection icons are
+mapped between emoji (desktop) and symbol names (mobile); item photos, tags, and field
+types are handled best-effort since the apps store them differently.
 
 ---
 

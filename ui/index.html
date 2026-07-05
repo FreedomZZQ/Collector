@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Collector's Notebook</title>
+  <link rel="stylesheet" href="styles.css?v=48" />
+</head>
+<body data-theme="dark">
+  <div id="app">
+    <aside id="left-panel" class="panel">
+      <div class="panel-header">
+        <h1 class="heading">Collections</h1>
+        <span class="spacer"></span>
+        <button class="icon-btn" id="btn-settings" title="Settings">⚙</button>
+        <button class="icon-btn" id="btn-new-coll" title="New collection">➕</button>
+      </div>
+      <div id="recovery-note" class="recovery hidden"></div>
+      <div class="search-wrap">
+        <input id="coll-search" class="search" type="text" placeholder="Filter collections..." />
+        <button class="search-clear hidden" data-for="coll-search">×</button>
+      </div>
+      <div class="sort-bar"><span class="sort-label">Sort:</span>
+        <button class="sort-btn" id="coll-sort-btn"></button>
+      </div>
+      <div id="coll-list" class="list"></div>
+      <div id="multi-hint" class="multi-hint"></div>
+    </aside>
+
+    <div class="splitter" id="split-left"></div>
+
+    <section id="mid-panel" class="panel">
+      <div class="panel-header">
+        <h1 class="heading one-line" id="mid-title">Items</h1>
+        <span class="spacer"></span>
+        <button class="danger-btn hidden" id="btn-del-multi">× Delete</button>
+        <button class="icon-btn hidden" id="btn-new-item" title="New item">➕</button>
+      </div>
+      <div id="mid-tools" class="hidden">
+        <div class="search-wrap">
+          <input id="item-search" class="search" type="text" placeholder="Search..." />
+          <button class="search-clear hidden" data-for="item-search">×</button>
+        </div>
+        <div class="sort-bar"><span class="sort-label">Sort:</span>
+          <button class="sort-btn" id="item-sort-btn"></button>
+        </div>
+      </div>
+      <div id="item-list" class="list"></div>
+      <div id="pick-prompt" class="center-prompt">
+        <div class="big-emoji">←</div>
+        <div class="muted">Select a collection</div>
+      </div>
+    </section>
+
+    <div class="splitter" id="split-mid"></div>
+
+    <main id="right-panel" class="panel">
+      <div id="detail-empty" class="center-prompt">
+        <div class="big-emoji">🔍</div>
+        <div class="muted">Select an item to view details</div>
+      </div>
+      <div id="detail" class="detail hidden"></div>
+    </main>
+  </div>
+
+  <div id="overlay-root"></div>
+  <script src="app.js?v=48"></script>
+</body>
+</html>

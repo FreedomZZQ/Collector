@@ -1,19 +1,20 @@
 name: Build
-# Build native binaries for Windows, macOS, and Linux.
+# Build Tauri bundles for Windows, macOS, and Linux.
 #
 # Triggers:
-#   - on every push to main / pull request: builds all (CI check)
-#   - on pushing a version tag like v1.0.0: builds all AND attaches
-#     the binaries to a GitHub Release. macOS ships as .dmg.
+#   - push to main / PR: builds all (CI check)
+#   - push a version tag v*: builds all AND attaches bundles to a Release
+#
+# Prereq committed to the repo: src-tauri/icons/ (run `cargo tauri icon` once
+# locally and commit) — the macOS/Windows bundlers require icon.icns/.ico.
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
-  workflow_dispatch:   # allows manual "Run workflow" button in the Actions tab
+  workflow_dispatch:
 
-# Needed so the release job can create a Release and upload assets.
 permissions:
   contents: write
 
@@ -27,20 +28,17 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: collectors-notebook.exe
-            asset: Collectors-Notebook-windows-x86_64.exe
+            asset_installer: Collectors-Notebook-windows-x86_64.msi
+            asset_portable: Collectors-Notebook-windows-x86_64-portable.exe
           - os: macos-latest
-            target: aarch64-apple-darwin       # Apple Silicon (M1+)
-            artifact: collectors-notebook
+            target: aarch64-apple-darwin
             asset: Collectors-Notebook-macos-arm64.dmg
           - os: macos-15-intel
-            target: x86_64-apple-darwin         # Intel Macs
-            artifact: collectors-notebook
+            target: x86_64-apple-darwin
             asset: Collectors-Notebook-macos-x86_64.dmg
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: collectors-notebook
-            asset: Collectors-Notebook-linux-x86_64
+            asset: Collectors-Notebook-linux-x86_64.AppImage
 
     steps:
       - name: Checkout
@@ -51,105 +49,76 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Cache cargo registry + build output to speed up subsequent runs.
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.target }}-cargo-
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
 
-      # Linux needs system libraries for the GUI (Slint/winit), font rendering,
-      # and the rfd native file dialog (GTK).
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxkbcommon-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
 
-      # -- Stage: Linux (raw binary) --
-      - name: Stage binary (Linux)
+      # One command per line — no shell line-continuations, which YAML/GHA can
+      # mangle into stray backslash args (that produced binstall's
+      # "multiple packages" error).
+      - name: Install tauri-cli
+        run: |
+          cargo binstall tauri-cli --version "^2" --locked --no-confirm || cargo install tauri-cli --version "^2" --locked
+          cargo tauri --version
+
+      - name: Build bundles (Windows / MSI)
+        if: runner.os == 'Windows'
+        run: cargo tauri build --target ${{ matrix.target }} --bundles msi
+
+      - name: Build bundles (macOS / Linux)
+        if: runner.os != 'Windows'
+        run: cargo tauri build --target ${{ matrix.target }}
+
+      - name: Stage (Linux AppImage)
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "dist/${{ matrix.asset }}"
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage "dist/${{ matrix.asset }}"
           chmod +x "dist/${{ matrix.asset }}"
 
-      # -- Stage: Windows (raw exe) --
-      - name: Stage binary (Windows)
+      - name: Stage (macOS dmg)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg "dist/${{ matrix.asset }}"
+
+      # The MSI filename contains an apostrophe ("Collector's Notebook_..."),
+      # which broke a glob copy silently. Resolve via -LiteralPath and fail
+      # loudly if nothing is found, so a silent miss can't pass as success.
+      - name: Stage (Windows installer + portable exe)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "dist/${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $msi = Get-ChildItem -LiteralPath "src-tauri/target/${{ matrix.target }}/release/bundle/msi" -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { Write-Error "No MSI found in bundle/msi"; exit 1 }
+          Copy-Item -LiteralPath $msi.FullName -Destination "dist/${{ matrix.asset_installer }}"
+          $exe = "src-tauri/target/${{ matrix.target }}/release/collectors-notebook.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { Write-Error "Portable exe missing"; exit 1 }
+          Copy-Item -LiteralPath $exe -Destination "dist/${{ matrix.asset_portable }}"
+          Get-ChildItem dist
 
-      # -- Stage: macOS (.app bundle inside a .dmg) --
-      - name: Stage binary (macOS dmg)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          APP="Collectors-Notebook.app"
-          mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-          cp "assets/icons/Collectors-Notebook.icns" "${APP}/Contents/Resources/Collectors-Notebook.icns"
-
-          cat > "${APP}/Contents/Info.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleIconFile</key>         <string>Collectors-Notebook</string>
-            <key>CFBundleName</key>             <string>Collector's Notebook</string>
-            <key>CFBundleDisplayName</key>      <string>Collector's Notebook</string>
-            <key>CFBundleExecutable</key>       <string>${{ matrix.artifact }}</string>
-            <key>CFBundleIdentifier</key>       <string>com.example.collectors-notebook</string>
-            <key>CFBundlePackageType</key>      <string>APPL</string>
-            <key>LSMinimumSystemVersion</key>   <string>10.13</string>
-            <key>NSHighResolutionCapable</key>  <true/>
-          </dict>
-          </plist>
-          PLIST
-
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "${APP}/Contents/MacOS/${{ matrix.artifact }}"
-          chmod +x "${APP}/Contents/MacOS/${{ matrix.artifact }}"
-
-          # Ad-hoc sign (not notarization -- users still right-click > Open first time).
-          codesign --force --deep --sign - "${APP}" || true
-
-          mkdir -p dist
-          # Simple, dependency-free dmg via hdiutil.
-          STAGE="$(mktemp -d)"
-          cp -R "${APP}" "${STAGE}/"
-          ln -s /Applications "${STAGE}/Applications"
-          hdiutil create -volname "Collector's Notebook" \
-            -srcfolder "${STAGE}" -ov -format UDZO \
-            "dist/${{ matrix.asset }}"
-
-      # Upload each platform's artifact (downloadable from the run summary).
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          name: bundles-${{ matrix.target }}
+          path: dist/*
           if-no-files-found: error
 
-      # On a version tag, attach the artifact to a GitHub Release.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ matrix.asset }}
+          files: dist/*
           fail_on_unmatched_files: true
