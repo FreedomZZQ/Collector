@@ -438,8 +438,11 @@ function applyChrome() {
   document.documentElement.style.setProperty("--accent", S.settings.accent_hex);
   const l = Math.min(Math.max(S.settings.left_ratio, 0.08), 0.33);
   const m = Math.min(Math.max(S.settings.mid_ratio, 0.12), 0.7);
-  $("left-panel").style.width = (l * 100) + "%";
-  $("mid-panel").style.width = ((1 - l) * m * 100) + "%";
+  // Two 6px splitters sit between the three panels; subtract their share so
+  // left + splitter + mid + splitter + right(flex:1) sum to exactly the
+  // window width — no overflow, no body showing through at the edges.
+  $("left-panel").style.width = `calc(${(l * 100).toFixed(4)}% - 9px)`;
+  $("mid-panel").style.width = `calc(${((1 - l) * m * 100).toFixed(4)}% - 5px)`;
 }
 function renderCollections() {
   const list = $("coll-list");
